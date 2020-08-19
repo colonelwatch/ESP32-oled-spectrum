@@ -7,6 +7,7 @@ There are also a number of improvements and notes here that will be carried over
 
 That includes:
 * True logarithmic scaling (frequency- *and* ampltitude-wise!), credit to and permission received from the [Rainmeter](https://github.com/rainmeter/rainmeter) project
+regarding their frequency scaling code.
   * Apologies to their dev team for taking my sweet time with the project!
   * Gating of the FFT output to stop artifacting
 * Reverting to the original fix_fft library, which was 16-bit integer FFT, but now with a maximum size of 2048
@@ -20,8 +21,6 @@ If you are adjusting the settings, banding in the output means the FFT size is t
 Here are some goals toward expanding room for both:
 * I2S sampling, to eliminate sampling overhead
 * Newton's square root, if it helps
-
-At the moment, without being able to use a larger FFT without causing a low refresh rate.
 
 Finally, a note on the attached schematic: this was NOT designed for line-level audio. Rather, it is
 meant to amplify listening level signals for headphones or earbuds.

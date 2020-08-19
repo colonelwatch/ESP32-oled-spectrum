@@ -26,4 +26,4 @@ At the moment, without being able to use a larger FFT without causing a low refr
 Finally, a note on the attached schematic: this was NOT designed for line-level audio. Rather, it is
 meant to amplify listening level signals for headphones or earbuds.
 
-!(Amplification circuit)[/images/amplification.png]
+![Amplification circuit](/images/amplification.png)

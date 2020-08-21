@@ -37,7 +37,7 @@
                                       //  for smoother output, lower for dynamic
                                       //  output.
 #define SENSITIVITY 0.125             // FFT output multiplier before post-processing.
-                                      //  Decrease for greater dynamic range, increase
+                                      //  Decrease for less amplitude artifacting, increase
                                       //  for sensitivity
 #define CAP 100                       // Use to map post-processed FFT output to
                                       //  display (raise for longer bars, lower
@@ -126,6 +126,7 @@ void IRAM_ATTR onTimer(){
 /* Core 0 thread */
 TaskHandle_t Task1;
 void Task1code( void * pvParameters ){
+  // Prepares frequency information for scaling algorithm, credit to Rainmeter project (see below)
   for(int i = 0; i < SAMPLES/2; i++) lin_fn[i] = SAMPLING_FREQUENCY * (i + 0.5) / SAMPLES;
   float f_step = (log((float)MAX_FREQUENCY/MIN_FREQUENCY)/log(2.)) / COLUMNS;
   for(int i = 0; i < COLUMNS; i++){
@@ -133,6 +134,7 @@ void Task1code( void * pvParameters ){
     else log_fn[i] = (float)log_fn[i-1] * pow(2.,f_step);
   }
 
+  // Initializes sampling interrupt
   timer = timerBegin(1, 80, true);
   timerAttachInterrupt(timer, &onTimer, true);
   timerAlarmWrite(timer, sample_period, true);
@@ -161,12 +163,13 @@ void Task1code( void * pvParameters ){
     analogBuffer_availible = false;   // Closes off buffer to prevent corruption
     // Reads entire circular buffer, starting from analogBuffer_index
     for(int i = 0; i < SAMPLES; i++){
-      // Samples are doubled to maximize precision at later stages
+      // Samples are upscaled to maximize precision at later stages
       vReal[i] = analogBuffer[(i+analogBuffer_index)%SAMPLES]*16;
       sum += vReal[i];
     }
     analogBuffer_availible = true;    // Restores access to buffer
   
+    // Removes leftover DC bias in signal
     int avg = sum/SAMPLES;
     for(int i = 0; i < SAMPLES; i++) vReal[i] -= avg;
    
@@ -197,11 +200,11 @@ void Task1code( void * pvParameters ){
     while(iBand < COLUMNS && iBin <= SAMPLES/2){
       binCount++;
       if(lin_fn[iBin] <= log_fn[iBand]){
-        if(vReal[iBin] > 16) output[iBand] += vReal[iBin];
+        if(vReal[iBin] > 4) output[iBand] += vReal[iBin];
         iBin++;
       }
       else{
-        if(vReal[iBin] > 16) output[iBand] += vReal[iBin];
+        if(vReal[iBin] > 4) output[iBand] += vReal[iBin];
         binCount = 0;
         iBand++;
       }

@@ -27,7 +27,7 @@
                                       //  Currently cannot greater than 2048.
 #define SAMPLING_FREQUENCY 44100      // Hz, raise for greater frequency range, decrease to
                                       //  reduce banding
-#define MAX_FREQUENCY 20000           // Hz, must be 1/2 of sampling frequency or less
+#define MAX_FREQUENCY 14000           // Hz, must be 1/2 of sampling frequency or less
 #define MIN_FREQUENCY 40              // Hz, cannot be 0, decreasing causes banding
 // Post-processing settings
 #define TIME_FACTOR 4                 // Configures rise smoothing function (raise
@@ -36,17 +36,20 @@
 #define TIME_FACTOR2 4                // Configures fall smoothing function (raise
                                       //  for smoother output, lower for dynamic
                                       //  output.
-#define SENSITIVITY 1.00              // FFT output multiplier before post-processing.
+#define SENSITIVITY 0.125             // FFT output multiplier before post-processing.
+                                      //  Decrease for greater dynamic range, increase
+                                      //  for sensitivity
 #define CAP 100                       // Use to map post-processed FFT output to
                                       //  display (raise for longer bars, lower
                                       //  to shorter bars)
-#define FLOOR 2                       // Use to cut off the buttom of the post-processed
-                                      //  output.
+#define FLOOR 0                       // Use to cut off the buttom of the post-processed
+                                      //  output. This can hide noise at the cost of
+                                      //  dynamic range.
 // Device settings
 #define DEBOUNCE 500                  // Debounce time in milliseconds for BOOT button
 #define COLUMNS 32                    // Number of columns to display, fewer columns
                                       //  will cause less banding
-#define COLUMN_SIZE 1                 // Size of columns in pixels
+#define COLUMN_SIZE 2                 // Size of columns in pixels
 
 
 // Declaration for an SSD1306 display connected to I2C (SDA, SCL pins)
@@ -159,7 +162,7 @@ void Task1code( void * pvParameters ){
     // Reads entire circular buffer, starting from analogBuffer_index
     for(int i = 0; i < SAMPLES; i++){
       // Samples are doubled to maximize precision at later stages
-      vReal[i] = analogBuffer[(i+analogBuffer_index)%SAMPLES]*2;
+      vReal[i] = analogBuffer[(i+analogBuffer_index)%SAMPLES]*16;
       sum += vReal[i];
     }
     analogBuffer_availible = true;    // Restores access to buffer
@@ -194,11 +197,11 @@ void Task1code( void * pvParameters ){
     while(iBand < COLUMNS && iBin <= SAMPLES/2){
       binCount++;
       if(lin_fn[iBin] <= log_fn[iBand]){
-        if(vReal[iBin] > 2) output[iBand] += vReal[iBin];
+        if(vReal[iBin] > 16) output[iBand] += vReal[iBin];
         iBin++;
       }
       else{
-        if(vReal[iBin] > 2) output[iBand] += vReal[iBin];
+        if(vReal[iBin] > 16) output[iBand] += vReal[iBin];
         binCount = 0;
         iBand++;
       }
@@ -216,8 +219,8 @@ void Task1code( void * pvParameters ){
       // log(SENSITIVITY) term is to emulate the above line (which MUST be used for
       //  the below if statement for some reason) but with greater precision
       //  TO-DO: Find out how to eleiminate dependence on above statement
-      if(postprocess[iCol] > OVERSAMPLE)
-        postprocess[iCol] = 40.*(log((float)(output[iCol]))+log(0.5/OVERSAMPLE)+log(SENSITIVITY));
+      if(postprocess[iCol] > 16*OVERSAMPLE)
+        postprocess[iCol] = 40.*(log((float)(output[iCol]))+log(0.0625/OVERSAMPLE)+log(SENSITIVITY));
       else postprocess[iCol] = 0;   // Cuts off negative values before they are calculated
       //
       

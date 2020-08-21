@@ -200,11 +200,11 @@ void Task1code( void * pvParameters ){
     while(iBand < COLUMNS && iBin <= SAMPLES/2){
       binCount++;
       if(lin_fn[iBin] <= log_fn[iBand]){
-        if(vReal[iBin] > 4) output[iBand] += vReal[iBin];
+        if(vReal[iBin] > 16) output[iBand] += vReal[iBin];
         iBin++;
       }
       else{
-        if(vReal[iBin] > 4) output[iBand] += vReal[iBin];
+        if(vReal[iBin] > 16) output[iBand] += vReal[iBin];
         binCount = 0;
         iBand++;
       }

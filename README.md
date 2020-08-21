@@ -1,6 +1,6 @@
 # ESP32-oled-spectrum
 
-[![Picture](/images/closeup.jpg)](https://www.youtube.com/watch?v=TEzQY4_xW6o)
+[![Picture](/images/closeup.jpeg)](https://www.youtube.com/watch?v=TEzQY4_xW6o)
 
 *Click through for youtube video of demonstration*
 

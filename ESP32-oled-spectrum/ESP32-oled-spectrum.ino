@@ -17,16 +17,11 @@
 #define SCREEN_HEIGHT 64 // OLED display height, in pixels
 
 /* User-configurable settings */
-// Sampling settings
-#define OVERSAMPLE 1                  // Number of readings collected per sample, results
-                                      //  in less aliasing. Only necessary when sampling
-                                      //  at under 44.1 kHz, and raises overhead.
 // FFT settings
 #define SAMPLES 2048                  // Must be a power of 2. Raise for higher resolution
                                       //  (less banding) and lower for faster performance.
                                       //  Currently cannot greater than 2048.
-#define SAMPLING_FREQUENCY 44100      // Hz, raise for greater frequency range, decrease to
-                                      //  reduce banding
+#define SAMPLING_FREQUENCY 44100      // Hz, changing this not recommended
 #define MAX_FREQUENCY 14000           // Hz, must be 1/2 of sampling frequency or less
 #define MIN_FREQUENCY 40              // Hz, cannot be 0, decreasing causes banding
 // Post-processing settings
@@ -62,7 +57,7 @@ const float coeff = 1./TIME_FACTOR;                 // Coefficients for rise smo
 const float anti_coeff = (TIME_FACTOR-1.)/TIME_FACTOR;
 const float coeff2 = 1./TIME_FACTOR2;               // Coefficients for fall smoothing
 const float anti_coeff2 = (TIME_FACTOR2-1.)/TIME_FACTOR2;
-const int sample_period = 1000000/SAMPLING_FREQUENCY/OVERSAMPLE;
+const int sample_period = 1000000/SAMPLING_FREQUENCY;
 
 /* Global variables */
 // Benchmarking variables
@@ -96,30 +91,18 @@ void IRAM_ATTR onTimer(){
   // accuracy the values must be stored in a contingency buffer. Then, when the interrupt
   // is triggered againt and the reading is over, the values are transferred from the
   // contingency buffer to analogBuffer.
-  // Moreover, by sampling at SAMPLING_FREQUENCY*OVERSAMPLE and taking the average of
-  // OVERSAMPLE samples, the original sampling frequency is preserved, and and digital
-  // filter with a Nyquist corner frequency
-  static int tempBuffer[OVERSAMPLE];
-  static int tempBuffer_index = 0;
-  tempBuffer[tempBuffer_index++] = analogRead(inputPin)-2048;
-  tempBuffer_index %= OVERSAMPLE;
-
-  if(tempBuffer_index == 0){
-    int virtual_reading = 0;
-    for(int i = 0; i < OVERSAMPLE; i++) virtual_reading += tempBuffer[i];
-    
-    static int contigBuffer[SAMPLES];
-    static int contigBuffer_index = 0;
-    if(!analogBuffer_availible){
-      contigBuffer[contigBuffer_index] = virtual_reading;
-      contigBuffer_index++;
-    }
-    else{
-      for(int i = 0; i < contigBuffer_index; i++)
-        analogBuffer_store(contigBuffer[i]);
-      contigBuffer_index = 0;
-      analogBuffer_store(virtual_reading);
-    }
+  
+  static int contigBuffer[SAMPLES];
+  static int contigBuffer_index = 0;
+  if(!analogBuffer_availible){
+    contigBuffer[contigBuffer_index] = analogRead(inputPin) - 2048;
+    contigBuffer_index++;
+  }
+  else{
+    for(int i = 0; i < contigBuffer_index; i++)
+      analogBuffer_store(contigBuffer[i]);
+    contigBuffer_index = 0;
+    analogBuffer_store(analogRead(inputPin) - 2048);
   }
 }
 
@@ -222,8 +205,8 @@ void Task1code( void * pvParameters ){
       // log(SENSITIVITY) term is to emulate the above line (which MUST be used for
       //  the below if statement for some reason) but with greater precision
       //  TO-DO: Find out how to eleiminate dependence on above statement
-      if(postprocess[iCol] > 16*OVERSAMPLE)
-        postprocess[iCol] = 40.*(log((float)(output[iCol]))+log(0.0625/OVERSAMPLE)+log(SENSITIVITY));
+      if(postprocess[iCol] > 16)
+        postprocess[iCol] = 40.*(log((float)(output[iCol]))+log(0.0625)+log(SENSITIVITY));
       else postprocess[iCol] = 0;   // Cuts off negative values before they are calculated
       //
       

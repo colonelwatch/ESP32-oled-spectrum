@@ -62,19 +62,41 @@ int frames;
 volatile int refresh;
 
 volatile float lin_fn[SAMPLES/2], log_fn[COLUMNS];  // Stores frequencies of FFT bins and output bands
-volatile int analogBuffer[SAMPLES] = {0};         // Circular buffer for storing analogReads
-volatile int analogBuffer_index = 0;          // Write index for analogBuffer, also used for reads
-volatile bool analogBuffer_availible = true;  // Memory busy flag for analogBuffer
-// Note to self, alter buffer sizes for OLED
-uint8_t displayBuffer[64] = {0};       // First buffer for storing LED matrix output
-uint8_t doubleBuffer[64]  = {0};       // Second buffer for storing LED matrix output
-uint8_t *readBuffer = doubleBuffer;     // Pointer that specifies which buffer is to be read from
-uint8_t *writeBuffer = displayBuffer;   // Pointer that specifies which buffer is to be written to
-volatile bool displayBuffer_availible = true;    // Memory busy flag for display buffer
-// End note
 
-/* Function prototypes, for some reason the complier wants them */
-void analogBuffer_store(int val);
+template <typename TYPE> class doubleBuffer{
+  public:
+    volatile TYPE *readBuffer, *writeBuffer;
+    volatile bool swap_ready = false;
+    void swap(){
+      volatile TYPE *temp = readBuffer;
+      readBuffer = writeBuffer;
+      writeBuffer = temp;
+    }
+    doubleBuffer(int size){
+      readBuffer = (TYPE*)calloc(size, sizeof(TYPE));
+      writeBuffer = (TYPE*)calloc(size, sizeof(TYPE));
+    }
+};
+doubleBuffer<uint8_t> screenBuffer(64); // Note to self, alter buffer sizes for OLED
+
+template <typename TYPE> class circularBuffer{
+  public:
+    int buffer_size;
+    volatile TYPE *buffer;
+    volatile int index;
+    volatile bool available = true;
+    void insert(TYPE val){
+      buffer[index] = val;
+      index++;
+      index %= buffer_size;
+    }
+    circularBuffer(int size){
+      buffer_size = size;
+      buffer = (TYPE*)calloc(size, sizeof(TYPE));
+    }
+};
+circularBuffer<int> analogBuffer(SAMPLES);
+
 void watchdogReset();
 //*Flash display function prototype removed
 int8_t int_sqrt(int16_t val);
@@ -90,15 +112,15 @@ void IRAM_ATTR onTimer(){
   
   static int contigBuffer[SAMPLES];
   static int contigBuffer_index = 0;
-  if(!analogBuffer_availible){
+  if(!analogBuffer.available){
     contigBuffer[contigBuffer_index] = analogRead(INPUT_PIN) - 2048;
     contigBuffer_index++;
   }
   else{
     for(int i = 0; i < contigBuffer_index; i++)
-      analogBuffer_store(contigBuffer[i]);
+      analogBuffer.insert(contigBuffer[i]);
     contigBuffer_index = 0;
-    analogBuffer_store(analogRead(INPUT_PIN) - 2048);
+    analogBuffer.insert(analogRead(INPUT_PIN) - 2048);
   }
 }
 
@@ -130,15 +152,15 @@ void Task1code( void * pvParameters ){
     // Reads entire analog buffer for FFT calculations. This means a LOT of
     // redundant data but its necessary to because using new data every time
     // requires very long delays in total when recording at low frequencies.
-    while(!analogBuffer_availible) watchdogReset();
-    analogBuffer_availible = false;   // Closes off buffer to prevent corruption
+    while(!analogBuffer.available) watchdogReset();
+    analogBuffer.available = false;   // Closes off buffer to prevent corruption
     // Reads entire circular buffer, starting from analogBuffer_index
     for(int i = 0; i < SAMPLES; i++){
       // Samples are upscaled to maximize precision at later stages
-      vReal[i] = analogBuffer[(i+analogBuffer_index)%SAMPLES]*16;
+      vReal[i] = analogBuffer.buffer[(i+analogBuffer.index)%SAMPLES]*16;
       sum += vReal[i];
     }
-    analogBuffer_availible = true;    // Restores access to buffer
+    analogBuffer.available = true;    // Restores access to buffer
   
     // Removes leftover DC bias in signal
     int avg = sum/SAMPLES;
@@ -216,10 +238,11 @@ void Task1code( void * pvParameters ){
     }
   
     // Translating output data into column heights, which is entered into the buffer
-    displayBuffer_availible = false;  // REDUNDANT, Old code to block access to the buffer
+    screenBuffer.swap_ready = false;  // REDUNDANT, Old code to block access to the buffer
                                       //  TODO: Remove?
+    uint8_t *writeBuffer = (uint8_t*)screenBuffer.writeBuffer;
     for(int i = 0; i < COLUMNS; i++) writeBuffer[i] = postprocess[i]*64/CAP;
-    displayBuffer_availible = true;   // Signals to other core that write is complete, and
+    screenBuffer.swap_ready = true;   // Signals to other core that write is complete, and
                                       //  that it can switch the buffers
     
     // Outputs benchmark data
@@ -246,7 +269,6 @@ void setup() {
     pinMode(36, INPUT);
     pinMode(0, INPUT_PULLUP);
 
-    displayBuffer_availible = false;
     display.begin(SSD1306_SWITCHCAPVCC, 0x3C);
     display.clearDisplay();
     display.display();
@@ -264,15 +286,14 @@ void setup() {
 
 void loop() {
     // Double-buffered output with page flipping to display
-    if(displayBuffer_availible){
-      uint8_t *tempPointer = readBuffer;
-      readBuffer = writeBuffer;
-      writeBuffer = tempPointer;
-      displayBuffer_availible = false;
+    if(screenBuffer.swap_ready){
+      screenBuffer.swap();
+      screenBuffer.swap_ready = false;
     }
 
     display.clearDisplay();
     display.drawFastHLine(0, 63, 128, WHITE);
+    uint8_t *readBuffer = (uint8_t*)screenBuffer.readBuffer;
     const int pixels_per_column = 128/COLUMNS;
     for(int i = 0; i < COLUMNS; i++){
       display.drawRect(i*pixels_per_column-COLUMN_SIZE, 64-readBuffer[i], COLUMN_SIZE, readBuffer[i], WHITE);
@@ -283,20 +304,6 @@ void loop() {
     
     refresh++;
 }
-
-// Stores the passed value into a SAMPLES-sized circular buffer called analogBuffer,
-//  which is declared as a volatile int array. Uses global volatile int
-//  analogBuffer_index as the write index and reads analogBuffer_availible as
-//  memory flag.
-void analogBuffer_store(int val){
-  analogBuffer[analogBuffer_index] = val;
-
-  // Increments index then uses modulo to limit range
-  analogBuffer_index++;
-  analogBuffer_index %= SAMPLES;
-}
-// Function note: Currently, analogBuffer_index is also used as the reference
-// in order to read the entire array in chronological order.
 
 void watchdogReset(){
   // Credit goes to akshar001 for this watchdog reset three-liner

@@ -41,16 +41,13 @@
                                       //  output. This can hide noise at the cost of
                                       //  dynamic range.
 // Device settings
-#define DEBOUNCE 500                  // Debounce time in milliseconds for BOOT button
 #define COLUMNS 32                    // Number of columns to display, fewer columns
                                       //  will cause less banding
 #define COLUMN_SIZE 2                 // Size of columns in pixels
 
-
+#define INPUT_PIN 36 // Labeled VP
 // Declaration for an SSD1306 display connected to I2C (SDA, SCL pins)
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1, 1000000UL);
-// Microphone input is 39
-// 3.5mm input is 36
 
 /* Global constants, calculated from user-defined values */
 const float coeff = 1./TIME_FACTOR;                 // Coefficients for rise smoothing
@@ -75,7 +72,6 @@ uint8_t *readBuffer = doubleBuffer;     // Pointer that specifies which buffer i
 uint8_t *writeBuffer = displayBuffer;   // Pointer that specifies which buffer is to be written to
 volatile bool displayBuffer_availible = true;    // Memory busy flag for display buffer
 // End note
-volatile int inputPin = 36;      // ADC pin, either 36(aux) or 39(microphone)
 
 /* Function prototypes, for some reason the complier wants them */
 void analogBuffer_store(int val);
@@ -95,14 +91,14 @@ void IRAM_ATTR onTimer(){
   static int contigBuffer[SAMPLES];
   static int contigBuffer_index = 0;
   if(!analogBuffer_availible){
-    contigBuffer[contigBuffer_index] = analogRead(inputPin) - 2048;
+    contigBuffer[contigBuffer_index] = analogRead(INPUT_PIN) - 2048;
     contigBuffer_index++;
   }
   else{
     for(int i = 0; i < contigBuffer_index; i++)
       analogBuffer_store(contigBuffer[i]);
     contigBuffer_index = 0;
-    analogBuffer_store(analogRead(inputPin) - 2048);
+    analogBuffer_store(analogRead(INPUT_PIN) - 2048);
   }
 }
 
@@ -126,14 +122,6 @@ void Task1code( void * pvParameters ){
   while(true){
     // Debouncing code that checks if the BOOT button has been pressed and, if
     // so, changes the audio source between the microphone and the 3.5mm jack
-    
-    static unsigned long milliseconds = millis();
-    // Update so that this does not overflow after enough time
-    if(digitalRead(0) == LOW && millis() > milliseconds + DEBOUNCE){
-      milliseconds = millis();
-      if(inputPin == 36) inputPin = 39;
-      else inputPin = 36;
-    }
     
     int sum = 0;
     int16_t vReal[SAMPLES] = {0};

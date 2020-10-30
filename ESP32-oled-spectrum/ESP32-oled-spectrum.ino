@@ -167,7 +167,7 @@ void Task1code( void * pvParameters ){
     fft_windowing_Hamming(vReal, power);  // Hamming windowing function based on a Hann 
                                           //  windowing function and adapted for the 
                                           //  original 16-bit library. Reduces FFT amplitudes
-                                          //  by around 2 to 4.
+                                          //  by around 2x to 4x.
     fix_fft(vReal, vImag, power, 0);
     
     for(int i = 0; i < SAMPLES/2; i++)

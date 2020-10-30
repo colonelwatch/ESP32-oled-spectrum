@@ -77,12 +77,22 @@ template <typename TYPE> class circularBuffer{
   public:
     int buffer_size;
     volatile TYPE *buffer;
-    volatile int write_index;
+    volatile int read_index = 0;
+    volatile int write_index = 0;
     volatile bool available = true;
     void insert(TYPE val){
       buffer[write_index] = val;
       write_index++;
       write_index %= buffer_size;
+    }
+    TYPE pop(){
+      TYPE val = buffer[read_index];
+      read_index++;
+      read_index %= buffer_size;
+      return val;
+    }
+    bool empty(){
+      return read_index == write_index;
     }
     circularBuffer(int size){
       buffer_size = size;
@@ -103,18 +113,14 @@ void IRAM_ATTR onTimer(){
   // accuracy the values must be stored in a contingency buffer. Then, when the interrupt
   // is triggered again and the reading is over, the values are transferred from the
   // contingency buffer to analogBuffer.
-  
-  static int contigBuffer[SAMPLES];
-  static int contigBuffer_index = 0;
-  if(!analogBuffer.available){
-    contigBuffer[contigBuffer_index] = analogRead(INPUT_PIN) - 2048;
-    contigBuffer_index++;
-  }
+
+  static circularBuffer<int16_t> contigBuffer(SAMPLES);
+
+  int val = analogRead(INPUT_PIN) - 2048;
+  if(!analogBuffer.available) contigBuffer.insert(val);
   else{
-    for(int i = 0; i < contigBuffer_index; i++)
-      analogBuffer.insert(contigBuffer[i]);
-    contigBuffer_index = 0;
-    analogBuffer.insert(analogRead(INPUT_PIN) - 2048);
+    while(!contigBuffer.empty()) analogBuffer.insert(contigBuffer.pop());
+    analogBuffer.insert(val);
   }
 }
 

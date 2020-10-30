@@ -36,9 +36,6 @@
                                       //  recommended)
 #define CAP 100                       // Use to map post-processed FFT output to
                                       //  display (changing not recommended)
-#define FLOOR 0                       // Use to cut off the buttom of the post-processed
-                                      //  output. This can hide noise at the cost of
-                                      //  dynamic range.
 // Device settings
 #define COLUMNS 32                    // Number of columns to display (fewer columns will
                                       //  cause less banding)
@@ -201,12 +198,6 @@ void Task1code( void * pvParameters ){
       else
         postprocess[iCol] = buff[iCol] * anti_coeff2 + postprocess[iCol] * coeff2;
       buff[iCol] = postprocess[iCol];
-    }
-
-    // Cutting off the smaller numbers representing signals too weak to be relevant
-    for(int i = 0; i < COLUMNS; i++){
-      if(postprocess[i] < FLOOR) postprocess[i] = 0;
-      else postprocess[i] -= FLOOR;
     }
   
     // Translating output data into column heights, which is entered into the buffer

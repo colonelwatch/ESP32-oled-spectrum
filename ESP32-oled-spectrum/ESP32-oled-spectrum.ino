@@ -31,7 +31,7 @@
 #define SENSITIVITY 0.125             // FFT output multiplier before post-processing.
                                       //  (increasing trades more output artifacting
                                       //  for sensitivity)
-#define THRESHOLD 32                  // Minimum threshold for log-scale frequency mapping,
+#define THRESHOLD 16                  // Minimum threshold for log-scale frequency mapping,
                                       //  necessary to reduce noise artifacts (changing not
                                       //  recommended)
 #define CAP 100                       // Use to map post-processed FFT output to
@@ -41,6 +41,7 @@
                                       //  cause less banding)
 #define COLUMN_SIZE 2                 // Size of columns in pixels
 
+#define CLIP_PIN 19  // Connect LED to this pin to get a clipping indicator
 #define INPUT_PIN 36 // Labeled VP
 // Declaration for an SSD1306 display connected to I2C (SDA, SCL pins)
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1, 1000000UL);
@@ -117,6 +118,9 @@ void IRAM_ATTR onTimer(){
   static circularBuffer<int16_t> contigBuffer(SAMPLES);
 
   int val = analogRead(INPUT_PIN) - 2048;
+  if(val > 2000) digitalWrite(CLIP_PIN, HIGH);
+  else digitalWrite(CLIP_PIN, LOW);
+
   if(!analogBuffer.available) contigBuffer.insert(val);
   else{
     while(!contigBuffer.empty()) analogBuffer.insert(contigBuffer.pop());
@@ -227,6 +231,7 @@ void Task1code( void * pvParameters ){
 void setup() {
     Serial.begin(115200);
     
+    pinMode(CLIP_PIN, OUTPUT);
     pinMode(INPUT_PIN, INPUT);
     pinMode(0, INPUT_PULLUP);
 

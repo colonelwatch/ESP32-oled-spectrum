@@ -164,9 +164,10 @@ void Task1code( void * pvParameters ){
     // Finds size of samples in a power of 2 and does the FFT
     int power = 1;
     while(SAMPLES != 1 << power) power++;
-    fft_windowing(vReal, power);  // Hann windowing function adapted for use with the 
-                                  //  original 16-bit library. Reduces FFT amplitudes
-                                  //  by around 2 to 4.
+    fft_windowing_Hamming(vReal, power);  // Hamming windowing function based on a Hann 
+                                          //  windowing function and adapted for the 
+                                          //  original 16-bit library. Reduces FFT amplitudes
+                                          //  by around 2 to 4.
     fix_fft(vReal, vImag, power, 0);
     
     for(int i = 0; i < SAMPLES/2; i++)

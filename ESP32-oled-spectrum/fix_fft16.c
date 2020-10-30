@@ -214,6 +214,24 @@ void fft_windowing(int16_t f[], int16_t m)
 }
 
 /*
+ * fft_windowing() - performs Hamming windowing using 16-bit
+ * contains one more int 16_t multiply and divide per bin
+ * than the Hann windowing function above
+ * 
+ * Adapted from the von Hann windowing function above
+  */
+void fft_windowing_Hamming(int16_t f[], int16_t m){
+  int16_t N = 1 << m;
+  //int8_t pow_raise = N_WAVE - N;
+  int16_t rad, n;
+  for(n = 0; n < N; n++){
+    rad = (N_WAVE * n) / N;
+    // rad = n << pow_raise;
+    f[n] = (f[n] * (35617 - 21*COS16(rad)/46)) / 65536;
+  }
+}
+
+/*
   fix_fft() - perform forward/inverse fast Fourier transform.
   fr[n],fi[n] are real and imaginary arrays, both INPUT AND
   RESULT (in-place FFT), with 0 <= n < 2**m; set inverse to

@@ -214,20 +214,18 @@ void fft_windowing(int16_t f[], int16_t m)
 }
 
 /*
- * fft_windowing() - performs Hamming windowing using 16-bit
- * contains one more int 16_t multiply and divide per bin
- * than the Hann windowing function above
+ * fft_windowing_Hamming()
+ * performs Hamming windowing using 16-bit and contains one more int16_t multiply and divide per bin
  * 
  * Adapted from the von Hann windowing function above
   */
 void fft_windowing_Hamming(int16_t f[], int16_t m){
   int16_t N = 1 << m;
-  //int8_t pow_raise = N_WAVE - N;
   int16_t rad, n;
   for(n = 0; n < N; n++){
     rad = (N_WAVE * n) / N;
-    // rad = n << pow_raise;
-    f[n] = (f[n] * (35617 - 21*COS16(rad)/46)) / 65536;
+	 // divisor below is 23, not 46 because COS16 amplitude is already about half of 65536
+    f[n] = (f[n] * (35617 - 25*COS16(rad)/23)) / 65536;
   }
 }
 

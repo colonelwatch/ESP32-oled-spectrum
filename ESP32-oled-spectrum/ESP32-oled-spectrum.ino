@@ -4,7 +4,7 @@
 //  should make this code run faster if you configure this too.
 // To do this, go to the platforms.txt files for the ESP32 in your AppData
 //  Arduino folder, under the "tools" folder and replace any "-Os" with "-O2".
-#include "fix_fft16.c"
+#include "kiss_fftr.h"
 // Used for watchdog reset
 #include "soc/timer_group_struct.h"
 #include "soc/timer_group_reg.h"
@@ -20,22 +20,15 @@
 // FFT settings
 #define SAMPLES 2048                  // Must be a power of 2. Raise for higher resolution
                                       //  (less banding) and lower for faster performance.
-                                      //  Currently cannot greater than 2048.
 #define SAMPLING_FREQUENCY 44100      // Hz, changing not recommended
 #define MAX_FREQUENCY 14000           // Hz, must be 1/2 of sampling frequency or less
 #define MIN_FREQUENCY 40              // Hz, cannot be 0, decreasing causes banding
 // Post-processing settings
-#define TIME_FACTOR 4.0               // Configures rise smoothing (factor of exponential
+#define TIME_FACTOR 3.0               // Configures rise smoothing (factor of exponential
                                       //  moving average)
-#define TIME_FACTOR2 4.0              // Configures fall smoothing (same as above)
-#define SENSITIVITY 0.125             // FFT output multiplier before post-processing.
-                                      //  (increasing trades more output artifacting
-                                      //  for sensitivity)
-#define THRESHOLD 16                  // Minimum threshold for log-scale frequency mapping,
-                                      //  necessary to reduce noise artifacts (changing not
-                                      //  recommended)
-#define CAP 100                       // Use to map post-processed FFT output to
-                                      //  display (changing not recommended)
+#define TIME_FACTOR2 3.0              // Configures fall smoothing (same as above)
+#define THRESHOLD -40                 // dB, minimum display value
+#define CAP -20                       // dB, maximum display value
 // Device settings
 #define COLUMNS 32                    // Number of columns to display (fewer columns will
                                       //  cause less banding)
@@ -100,11 +93,11 @@ template <typename TYPE> class circularBuffer{
       buffer = (TYPE*)calloc(size, sizeof(TYPE));
     }
 };
-circularBuffer<int16_t> analogBuffer(SAMPLES);
+circularBuffer<int> analogBuffer(SAMPLES);
 
 void watchdogReset();
-//*Flash display function prototype removed
-int8_t int_sqrt(int16_t val);
+void calculate_Hann(float window[], int N);
+void apply_window(float in[], float window[], int N);
 
 /* Core 0 Interrupt thread */
 hw_timer_t * timer = NULL;
@@ -115,10 +108,10 @@ void IRAM_ATTR onTimer(){
   // is triggered again and the reading is over, the values are transferred from the
   // contingency buffer to analogBuffer.
 
-  static circularBuffer<int16_t> contigBuffer(SAMPLES);
+  static circularBuffer<int> contigBuffer(SAMPLES);
 
-  int val = analogRead(INPUT_PIN) - 2048;
-  if(val > 2000) digitalWrite(CLIP_PIN, HIGH);
+  int val = analogRead(INPUT_PIN);
+  if(val > 4000) digitalWrite(CLIP_PIN, HIGH);
   else digitalWrite(CLIP_PIN, LOW);
 
   if(!analogBuffer.available) contigBuffer.insert(val);
@@ -145,73 +138,71 @@ void Task1code( void * pvParameters ){
   timerAttachInterrupt(timer, &onTimer, true);
   timerAlarmWrite(timer, sample_period, true);
   timerAlarmEnable(timer);
+
+  // Initializes kiss_fftr and window
+  float window[SAMPLES];
+  calculate_Hann(window, SAMPLES);
+  kiss_fftr_cfg cfg = kiss_fftr_alloc(SAMPLES, 0, NULL, NULL);
   
   while(true){
-    int sum = 0;
-    int16_t vReal[SAMPLES] = {0};
-    int16_t vImag[SAMPLES] = {0};
+    float sum = 0;
+    float in[SAMPLES];
     // Reads ENTIRE circular analog buffer starting from analogBuffer.write_index, this
     //  means a lot of overlapping data, but it decouples FFT calculations from sampling
     analogBuffer.available = false;   // Closes off buffer to prevent corruption
     // Reads entire circular buffer, starting from analogBuffer_index
     for(int i = 0; i < SAMPLES; i++){
-      // Samples are upscaled to maximize precision at later stages
-      vReal[i] = analogBuffer.buffer[(i+analogBuffer.write_index)%SAMPLES]*16;
-      sum += vReal[i];
+      int val = analogBuffer.buffer[(i+analogBuffer.write_index)%SAMPLES];
+      in[i] = (val - 2048) / 2048.;
+      sum += in[i];
     }
     analogBuffer.available = true;    // Restores access to buffer
   
     // Removes leftover DC bias in signal
-    int avg = sum/SAMPLES;
-    for(int i = 0; i < SAMPLES; i++) vReal[i] -= avg;
+    float avg = sum/SAMPLES;
+    for(int i = 0; i < SAMPLES; i++) in[i] -= avg;
    
-    // Finds size of samples in a power of 2 and does the FFT
-    int power = 1;
-    while(SAMPLES != 1 << power) power++;
-    fft_windowing_Hamming(vReal, power);  // Hamming windowing function based on a Hann 
-                                          //  windowing function and adapted for the 
-                                          //  original 16-bit library. Reduces FFT amplitudes
-                                          //  by around 2x to 4x.
-    fix_fft(vReal, vImag, power, 0);
+    // Applies windowing and FFT
+    kiss_fft_cpx out[SAMPLES] = {0};
+    apply_window(in, window, SAMPLES);
+    kiss_fftr(cfg, in, out);
     
+    // Finds magnitudes of complex "out" (normalized) and places them back in contiguous "in"
     for(int i = 0; i < SAMPLES/2; i++)
-      vReal[i] = int_sqrt(vReal[i]*vReal[i] + vImag[i]*vImag[i]);
+      in[i] = sqrt(out[i].r*out[i].r + out[i].i*out[i].i) / (SAMPLES/2);
 
     // Adapted from open source Rainmeter's audio visualization code with permission from the development team.
     //  https://github.com/rainmeter/rainmeter/blob/master/Plugins/PluginAudioLevel/PluginAudioLevel.cpp
-    int output[COLUMNS] = {0};
+    float out_columns[COLUMNS] = {0};
     int iBand = 0;
     int iBin = 0;
     while(iBand < COLUMNS && iBin <= SAMPLES/2){
       if(lin_fn[iBin] <= log_fn[iBand]){
-        if(vReal[iBin] > THRESHOLD) output[iBand] += vReal[iBin];
+        out_columns[iBand] += in[iBin];
         iBin++;
       }
       else{
-        if(vReal[iBin] > THRESHOLD) output[iBand] += vReal[iBin];
+        out_columns[iBand] += in[iBin];
         iBand++;
       }
     }
 
-    float postprocess[64];
-    static float buff[64];
-    for(int iCol = 0; iCol < 64; iCol++){
-      // Applying log scale, log(0.0625) term compensates for 16x scaling before FFT and
-      //  log(SENSITIVITY) term applies sensitivity
-      if(output[iCol] > 16/SENSITIVITY)
-        postprocess[iCol] = 40*(log((float)(output[iCol]))+log(0.0625)+log(SENSITIVITY));
-      else postprocess[iCol] = 0;   // Cuts off negative values before they are calculated
+    static float past_columns[COLUMNS];
+    for(int i = 0; i < COLUMNS; i++){
+      out_columns[i] = 20*log10(out_columns[i]); // Finds decibel value
       
       // Exponential moving average smoothing
-      if(postprocess[iCol] > buff[iCol])
-        postprocess[iCol] = buff[iCol] * anti_coeff + postprocess[iCol] * coeff;
+      if(out_columns[i] > past_columns[i])
+        out_columns[i] = past_columns[i] * anti_coeff + out_columns[i] * coeff;
       else
-        postprocess[iCol] = buff[iCol] * anti_coeff2 + postprocess[iCol] * coeff2;
-      buff[iCol] = postprocess[iCol];
-    }
+        out_columns[i] = past_columns[i] * anti_coeff2 + out_columns[i] * coeff2;
+      past_columns[i] = out_columns[i];
   
-    // Translating output data into column heights, which is entered into the buffer
-    for(int i = 0; i < COLUMNS; i++) screenBuffer.writeBuffer[i] = 64*postprocess[i]/CAP;
+      // Translating output data into column heights, which is entered into the buffer
+      if(out_columns[i] < THRESHOLD) out_columns[i] = 0;
+      else out_columns[i] -= THRESHOLD;
+      screenBuffer.writeBuffer[i] = 64*out_columns[i]/(CAP-THRESHOLD);
+    }
     screenBuffer.swap_ready = true;   // Raises flag to indicate buffer is ready to push
     
     watchdogReset();
@@ -278,18 +269,13 @@ void watchdogReset(){
   TIMERG0.wdt_wprotect=0;
 }
 
-//* Flash display function definition removed
-
-// Recursively computes square root and replaces the Arduino-provided sqrt function, 
-// which used floating point math. Outputs reasonably for any number less than int32_t 
-// max but works fastest on smaller numbers.
-int16_t int_sqrt(int32_t val){
-  // Initial values if n = 0
-  int32_t Nsquared = 0;
-  int32_t twoNplus1 = 1;
-  while(Nsquared <= val){
-    Nsquared += twoNplus1;
-    twoNplus1 += 2;
+void calculate_Hann(float window[], int N){
+  for(int i = 0; i < N; i++){
+    float a0 = 0.5;
+    window[i] = a0-(1-a0)*cos(2*PI*i/(N-1));
   }
-  return twoNplus1/2 - 1;
+}
+
+void apply_window(float in[], float window[], int N){
+  for(int i = 0; i < N; i++) in[i] *= window[i];
 }

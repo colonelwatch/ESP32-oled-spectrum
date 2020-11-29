@@ -4,7 +4,10 @@
 //  should make this code run faster if you configure this too.
 // To do this, go to the platforms.txt files for the ESP32 in your AppData
 //  Arduino folder, under the "tools" folder and replace any "-Os" with "-O2".
+#define FIXED_POINT 16 // Q15 flag to be propogated into kiss_fft headers
+#include "kiss_fft.h"
 #include "kiss_fftr.h"
+#include "_kiss_fft_guts.h"
 // Used for watchdog reset
 #include "soc/timer_group_struct.h"
 #include "soc/timer_group_reg.h"
@@ -24,9 +27,9 @@
 #define MAX_FREQUENCY 14000           // Hz, must be 1/2 of sampling frequency or less
 #define MIN_FREQUENCY 40              // Hz, cannot be 0, decreasing causes banding
 // Post-processing settings
-#define TIME_FACTOR 3.0               // Configures rise smoothing (factor of exponential
+#define TIME_FACTOR 6.0               // Configures rise smoothing (factor of exponential
                                       //  moving average)
-#define TIME_FACTOR2 3.0              // Configures fall smoothing (same as above)
+#define TIME_FACTOR2 6.0              // Configures fall smoothing (same as above)
 #define THRESHOLD -40                 // dB, minimum display value
 #define CAP -20                       // dB, maximum display value
 // Device settings
@@ -96,8 +99,9 @@ template <typename TYPE> class circularBuffer{
 circularBuffer<int> analogBuffer(SAMPLES);
 
 void watchdogReset();
-void calculate_Hann(float window[], int N);
-void apply_window(float in[], float window[], int N);
+int16_t int_sqrt(int32_t val);
+void calculate_Hann(int16_t window[], int N);
+void apply_window(int16_t in[], int16_t window[], int N);
 
 /* Core 0 Interrupt thread */
 hw_timer_t * timer = NULL;
@@ -140,26 +144,29 @@ void Task1code( void * pvParameters ){
   timerAlarmEnable(timer);
 
   // Initializes kiss_fftr and window
-  float window[SAMPLES];
+  int16_t window[SAMPLES];
   calculate_Hann(window, SAMPLES);
   kiss_fftr_cfg cfg = kiss_fftr_alloc(SAMPLES, 0, NULL, NULL);
+
+  // Initalize benchmark
+  float currentMillis = millis();
   
   while(true){
-    float sum = 0;
-    float in[SAMPLES];
+    int32_t sum = 0;
+    int16_t in[SAMPLES];
     // Reads ENTIRE circular analog buffer starting from analogBuffer.write_index, this
     //  means a lot of overlapping data, but it decouples FFT calculations from sampling
     analogBuffer.available = false;   // Closes off buffer to prevent corruption
     // Reads entire circular buffer, starting from analogBuffer_index
     for(int i = 0; i < SAMPLES; i++){
       int val = analogBuffer.buffer[(i+analogBuffer.write_index)%SAMPLES];
-      in[i] = (val - 2048) / 2048.;
+      in[i] = 16*(val - 2048); // TODO: possible clipping when subtracting the average?
       sum += in[i];
     }
     analogBuffer.available = true;    // Restores access to buffer
-  
+    
     // Removes leftover DC bias in signal
-    float avg = sum/SAMPLES;
+    int16_t avg = sum/SAMPLES;
     for(int i = 0; i < SAMPLES; i++) in[i] -= avg;
    
     // Applies windowing and FFT
@@ -169,27 +176,32 @@ void Task1code( void * pvParameters ){
     
     // Finds magnitudes of complex "out" (normalized) and places them back in contiguous "in"
     for(int i = 0; i < SAMPLES/2; i++)
-      in[i] = sqrt(out[i].r*out[i].r + out[i].i*out[i].i) / (SAMPLES/2);
+      in[i] = 2*int_sqrt(out[i].r*out[i].r + out[i].i*out[i].i); // TODO: Switch with int version
 
     // Adapted from open source Rainmeter's audio visualization code with permission from the development team.
     //  https://github.com/rainmeter/rainmeter/blob/master/Plugins/PluginAudioLevel/PluginAudioLevel.cpp
-    float out_columns[COLUMNS] = {0};
+    int16_t out_bands[COLUMNS] = {0};
     int iBand = 0;
     int iBin = 0;
     while(iBand < COLUMNS && iBin <= SAMPLES/2){
       if(lin_fn[iBin] <= log_fn[iBand]){
-        out_columns[iBand] += in[iBin];
+        out_bands[iBand] += in[iBin];
         iBin++;
       }
       else{
-        out_columns[iBand] += in[iBin];
+        out_bands[iBand] += in[iBin];
         iBand++;
       }
     }
 
+    float out_columns[COLUMNS];
     static float past_columns[COLUMNS];
     for(int i = 0; i < COLUMNS; i++){
-      out_columns[i] = 20*log10(out_columns[i]); // Finds decibel value
+      out_columns[i] = 20*(log10(out_bands[i])-log10(1<<15)); // Finds decibel value
+
+      // Converting decibel values into positive values and blocking anything under THRESHOLD
+      if(out_columns[i] < THRESHOLD) out_columns[i] = 0;
+      else out_columns[i] -= THRESHOLD;
       
       // Exponential moving average smoothing
       if(out_columns[i] > past_columns[i])
@@ -199,8 +211,6 @@ void Task1code( void * pvParameters ){
       past_columns[i] = out_columns[i];
   
       // Translating output data into column heights, which is entered into the buffer
-      if(out_columns[i] < THRESHOLD) out_columns[i] = 0;
-      else out_columns[i] -= THRESHOLD;
       screenBuffer.writeBuffer[i] = 64*out_columns[i]/(CAP-THRESHOLD);
     }
     screenBuffer.swap_ready = true;   // Raises flag to indicate buffer is ready to push
@@ -210,7 +220,7 @@ void Task1code( void * pvParameters ){
     // Outputs benchmark data
     frames++;
     static bool benchmark_posted = false;
-    if(millis() > 5000 && !benchmark_posted){
+    if(millis()-currentMillis > 5000 && !benchmark_posted){
       Serial.print(frames/5);
       Serial.print(' ');
       Serial.println(refresh/5);
@@ -269,13 +279,28 @@ void watchdogReset(){
   TIMERG0.wdt_wprotect=0;
 }
 
-void calculate_Hann(float window[], int N){
+// Calculates Hann window in Q15 form
+void calculate_Hann(int16_t window[], int N){
   for(int i = 0; i < N; i++){
     float a0 = 0.5;
-    window[i] = a0-(1-a0)*cos(2*PI*i/(N-1));
+    window[i] = (1<<15)*(a0-(1-a0)*cos(2*PI*i/N));
   }
 }
 
-void apply_window(float in[], float window[], int N){
-  for(int i = 0; i < N; i++) in[i] *= window[i];
+// Applies a window in Q15 form
+void apply_window(int16_t in[], int16_t window[], int N){
+  for(int i = 0; i < N; i++) in[i] = (in[i]*window[i])/(1<<15);
+}
+
+// Computes square root and replaces the Arduino-provided sqrt function, which used floating point math.
+// Outputs reasonably fast for any number less than int32_t max but works fastest on smaller numbers.
+int16_t int_sqrt(int32_t val){
+  // Initial values if n = 0
+  int32_t Nsquared = 0;
+  int32_t twoNplus1 = 1;
+  while(Nsquared <= val){
+    Nsquared += twoNplus1;
+    twoNplus1 += 2;
+  }
+  return twoNplus1/2 - 1;
 }

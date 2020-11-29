@@ -6,6 +6,8 @@
  *  See COPYING file for more information.
  */
 
+#define FIXED_POINT 16
+
 #ifndef KISS_FFT_H
 #define KISS_FFT_H
 
@@ -44,6 +46,7 @@ extern "C" {
 
 #ifdef FIXED_POINT
 #include <sys/types.h>	
+#include <stdint.h> // Added to help kiss_fft compile in Arduino for ESP32 - colonelwatch
 # if (FIXED_POINT == 32)
 #  define kiss_fft_scalar int32_t
 # else	

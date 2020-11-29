@@ -13,10 +13,9 @@ That includes:
 * True logarithmic scaling (frequency- *and* ampltitude-wise!), credit to and permission received from the [Rainmeter](https://github.com/rainmeter/rainmeter) project
 regarding their frequency scaling code.
   * Apologies to their dev team for taking my sweet time with the project!
-  * Gating of the FFT output to stop artifacting
-* Reverting to the original fix_fft library, which was 16-bit integer FFT, but now with a maximum size of 2048
-* Oversampling to prevent aliasing
-* Replaced floating-point sqrt() with recursive integer-based square root and other optimizations
+  * Amplitudes are now in decibels, which is unambiguous
+* Switching to the kiss_fft library, which is faster and has a permissive license
+* Replacing floating-point sqrt() with recursive integer-based square root and other optimizations
 * Improved semantics
 
 If you are adjusting the settings, banding in the output means the FFT size is too small, however keep in mind that 

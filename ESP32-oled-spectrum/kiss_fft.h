@@ -6,8 +6,6 @@
  *  See COPYING file for more information.
  */
 
-#define FIXED_POINT 16
-
 #ifndef KISS_FFT_H
 #define KISS_FFT_H
 

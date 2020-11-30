@@ -1,13 +1,9 @@
 // Copyright 2020 colonelwatch
 
-// Note to self: the latest code was compiled with O2 optimization. That
-//  should make this code run faster if you configure this too.
-// To do this, go to the platforms.txt files for the ESP32 in your AppData
-//  Arduino folder, under the "tools" folder and replace any "-Os" with "-O2".
-#define FIXED_POINT 16 // Q15 flag to be propogated into kiss_fft headers
-#include "kiss_fft.h"
+// Note: This NEEDS the attached platform.local.txt file to compile correctly. It sends a
+//  preprocessor flag to the kiss_fft library properly. To use it, copy it into:
+//  C:\Users\%USERPROFILE%\AppData\Local\Arduino15\packages\esp32\hardware\esp32\1.0.4
 #include "kiss_fftr.h"
-#include "_kiss_fft_guts.h"
 // Used for watchdog reset
 #include "soc/timer_group_struct.h"
 #include "soc/timer_group_reg.h"

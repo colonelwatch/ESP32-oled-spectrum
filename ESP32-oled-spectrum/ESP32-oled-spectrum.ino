@@ -4,6 +4,7 @@
 //  preprocessor flag to the kiss_fft library properly. To use it, copy it into:
 //  C:\Users\%USERPROFILE%\AppData\Local\Arduino15\packages\esp32\hardware\esp32\1.0.4
 #include "kiss_fftr.h"
+#include "cq_kernel.h"
 // Used for watchdog reset
 #include "soc/timer_group_struct.h"
 #include "soc/timer_group_reg.h"
@@ -26,8 +27,8 @@
 #define TIME_FACTOR 6.0               // Configures rise smoothing (factor of exponential
                                       //  moving average)
 #define TIME_FACTOR2 6.0              // Configures fall smoothing (same as above)
-#define THRESHOLD -40                 // dB, minimum display value
-#define CAP -20                       // dB, maximum display value
+#define THRESHOLD -50                 // dB, minimum display value
+#define CAP -30                       // dB, maximum display value
 // Device settings
 #define COLUMNS 32                    // Number of columns to display (fewer columns will
                                       //  cause less banding)
@@ -124,14 +125,16 @@ void IRAM_ATTR onTimer(){
 /* Core 0 thread */
 TaskHandle_t Task1;
 void Task1code( void * pvParameters ){
-  // Preps frequency information for scaling algorithm (credit to Rainmeter project below)
-  float lin_fn[SAMPLES/2], log_fn[COLUMNS];
-  for(int i = 0; i < SAMPLES/2; i++) lin_fn[i] = SAMPLING_FREQUENCY * (i + 0.5) / SAMPLES;
-  float f_step = (log((float)MAX_FREQUENCY/MIN_FREQUENCY)/log(2.)) / COLUMNS;
-  for(int i = 0; i < COLUMNS; i++){
-    if(i == 0) log_fn[i] = MIN_FREQUENCY * pow(2.,f_step/2.);
-    else log_fn[i] = (float)log_fn[i-1] * pow(2.,f_step);
-  }
+  struct cq_kernel_cfg cq_cfg = {
+    .samples = SAMPLES,
+    .bands = COLUMNS,
+    .fmin = MIN_FREQUENCY,
+    .fmax = MAX_FREQUENCY,
+    .fs = SAMPLING_FREQUENCY,
+    .min_val = 5000
+  };
+
+  cq_kernels_t kernels = generate_kernels(cq_cfg);
 
   // Initializes sampling interrupt
   timer = timerBegin(1, 80, true);
@@ -146,6 +149,8 @@ void Task1code( void * pvParameters ){
 
   // Initalize benchmark
   float currentMillis = millis();
+  refresh = 0;
+  frames = 0;
   
   while(true){
     int32_t sum = 0;
@@ -170,25 +175,21 @@ void Task1code( void * pvParameters ){
     apply_window(in, window, SAMPLES);
     kiss_fftr(cfg, in, out);
     
-    // Finds magnitudes of complex "out" (normalized) and places them back in contiguous "in"
-    for(int i = 0; i < SAMPLES/2; i++)
-      in[i] = 2*int_sqrt(out[i].r*out[i].r + out[i].i*out[i].i); // TODO: Switch with int version
+    // Cutting off garbage values with a threshold proportional to SAMPLES
+    for(int i = 0; i < SAMPLES; i++){
+      if(out[i].r < SAMPLES*20/2048) out[i].r = 0;
+      if(out[i].i < SAMPLES*20/2048) out[i].i = 0;
+    }
 
     // Adapted from open source Rainmeter's audio visualization code with permission from the development team.
     //  https://github.com/rainmeter/rainmeter/blob/master/Plugins/PluginAudioLevel/PluginAudioLevel.cpp
     int16_t out_bands[COLUMNS] = {0};
-    int iBand = 0;
-    int iBin = 0;
-    while(iBand < COLUMNS && iBin <= SAMPLES/2){
-      if(lin_fn[iBin] <= log_fn[iBand]){
-        out_bands[iBand] += in[iBin];
-        iBin++;
-      }
-      else{
-        out_bands[iBand] += in[iBin];
-        iBand++;
-      }
-    }
+    kiss_fft_cpx bands_cpx[COLUMNS] = {0};
+    apply_kernels(out, bands_cpx, kernels, cq_cfg);
+
+    // Finds (normalized) magnitudes of complex "bands_cpx" and places them in contiguous "out_bands"
+    for(int i = 0; i < COLUMNS; i++)
+      out_bands[i] = 2*int_sqrt(bands_cpx[i].r*bands_cpx[i].r + bands_cpx[i].i*bands_cpx[i].i); // TODO: Switch with int version
 
     float out_columns[COLUMNS];
     static float past_columns[COLUMNS];

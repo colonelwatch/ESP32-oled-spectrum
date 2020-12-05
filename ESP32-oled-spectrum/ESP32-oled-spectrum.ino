@@ -24,6 +24,8 @@
 #define MAX_FREQUENCY 14000           // Hz, must be 1/2 of sampling frequency or less
 #define MIN_FREQUENCY 40              // Hz, cannot be 0, decreasing causes banding
 // Post-processing settings
+#define CUTOFF 20                     // Helps determine where to cut low-value noise in
+                                      //  FFT output.
 #define TIME_FACTOR 6.0               // Configures rise smoothing (factor of exponential
                                       //  moving average)
 #define TIME_FACTOR2 6.0              // Configures fall smoothing (same as above)
@@ -177,8 +179,8 @@ void Task1code( void * pvParameters ){
     
     // Cutting off garbage values with a threshold proportional to SAMPLES
     for(int i = 0; i < SAMPLES; i++){
-      if(out[i].r < SAMPLES*20/2048) out[i].r = 0;
-      if(out[i].i < SAMPLES*20/2048) out[i].i = 0;
+      if(out[i].r < 2048*CUTOFF/SAMPLES) out[i].r = 0;
+      if(out[i].i < 2048*CUTOFF/SAMPLES) out[i].i = 0;
     }
 
     // Adapted from open source Rainmeter's audio visualization code with permission from the development team.

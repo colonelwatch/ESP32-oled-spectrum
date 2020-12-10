@@ -18,7 +18,7 @@
 
 /* User-configurable settings */
 // FFT settings
-#define SAMPLES 2048                  // Must be a power of 2. Raise for higher resolution
+#define SAMPLES 4096                  // Must be a power of 2. Raise for higher resolution
                                       //  (less banding) and lower for faster performance.
 #define SAMPLING_FREQUENCY 44100      // Hz, changing not recommended
 #define MAX_FREQUENCY 14000           // Hz, must be 1/2 of sampling frequency or less
@@ -26,9 +26,12 @@
 // Post-processing settings
 #define CUTOFF 20                     // Helps determine where to cut low-value noise in
                                       //  FFT output.
-#define TIME_FACTOR 6.0               // Configures rise smoothing (factor of exponential
+#define MINVAL 6500                   // Recommended range (3000-7500). Cutoff in Constant
+                                      //  Q kernels. Raise for filter selectivity, lower
+                                      //  for more bleed.
+#define TIME_FACTOR 3.0               // Configures rise smoothing (factor of exponential
                                       //  moving average)
-#define TIME_FACTOR2 6.0              // Configures fall smoothing (same as above)
+#define TIME_FACTOR2 3.0              // Configures fall smoothing (same as above)
 #define THRESHOLD -50                 // dB, minimum display value
 #define CAP -30                       // dB, maximum display value
 // Device settings
@@ -133,7 +136,7 @@ void Task1code( void * pvParameters ){
     .fmin = MIN_FREQUENCY,
     .fmax = MAX_FREQUENCY,
     .fs = SAMPLING_FREQUENCY,
-    .min_val = 5000
+    .min_val = MINVAL
   };
 
   cq_kernels_t kernels = generate_kernels(cq_cfg);

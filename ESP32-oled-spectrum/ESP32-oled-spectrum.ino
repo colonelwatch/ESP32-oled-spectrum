@@ -28,7 +28,7 @@
                                       //  FFT output.
 #define MINVAL 6500                   // Recommended range (3000-7500). Cutoff in Constant
                                       //  Q kernels. Raise for filter selectivity, lower
-                                      //  for more bleed.
+                                      //  for more bleed. Lower impacts performance slightly.
 #define TIME_FACTOR 3.0               // Configures rise smoothing (factor of exponential
                                       //  moving average)
 #define TIME_FACTOR2 3.0              // Configures fall smoothing (same as above)
@@ -130,6 +130,7 @@ void IRAM_ATTR onTimer(){
 /* Core 0 thread */
 TaskHandle_t Task1;
 void Task1code( void * pvParameters ){
+  // Initializes cq_kernels and generates kernels
   struct cq_kernel_cfg cq_cfg = {
     .samples = SAMPLES,
     .bands = COLUMNS,
@@ -138,7 +139,6 @@ void Task1code( void * pvParameters ){
     .fs = SAMPLING_FREQUENCY,
     .min_val = MINVAL
   };
-
   cq_kernels_t kernels = generate_kernels(cq_cfg);
 
   // Initializes sampling interrupt
@@ -180,7 +180,7 @@ void Task1code( void * pvParameters ){
     apply_window(in, window, SAMPLES);
     kiss_fftr(cfg, in, out);
     
-    // Cutting off garbage values with a threshold proportional to SAMPLES
+    // Cutting off garbage values with a threshold inversely proportional to SAMPLES
     for(int i = 0; i < SAMPLES; i++){
       if(out[i].r < 2048*CUTOFF/SAMPLES) out[i].r = 0;
       if(out[i].i < 2048*CUTOFF/SAMPLES) out[i].i = 0;
@@ -188,13 +188,13 @@ void Task1code( void * pvParameters ){
 
     // Adapted from open source Rainmeter's audio visualization code with permission from the development team.
     //  https://github.com/rainmeter/rainmeter/blob/master/Plugins/PluginAudioLevel/PluginAudioLevel.cpp
-    int16_t out_bands[COLUMNS] = {0};
     kiss_fft_cpx bands_cpx[COLUMNS] = {0};
     apply_kernels(out, bands_cpx, kernels, cq_cfg);
 
     // Finds (normalized) magnitudes of complex "bands_cpx" and places them in contiguous "out_bands"
+    int16_t out_bands[COLUMNS] = {0};
     for(int i = 0; i < COLUMNS; i++)
-      out_bands[i] = 2*int_sqrt(bands_cpx[i].r*bands_cpx[i].r + bands_cpx[i].i*bands_cpx[i].i); // TODO: Switch with int version
+      out_bands[i] = 2*int_sqrt(bands_cpx[i].r*bands_cpx[i].r + bands_cpx[i].i*bands_cpx[i].i);
 
     float out_columns[COLUMNS];
     static float past_columns[COLUMNS];

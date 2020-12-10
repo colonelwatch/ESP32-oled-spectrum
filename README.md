@@ -10,24 +10,18 @@ I borrowed from another project [attiny85-spectrum](https://github.com/colonelwa
 There are also a number of improvements and notes here that will be carried over to the original project eventually.
 
 That includes:
-* True logarithmic scaling (frequency- *and* ampltitude-wise!), credit to and permission received from the [Rainmeter](https://github.com/rainmeter/rainmeter) project
-regarding their frequency scaling code.
-  * Apologies to their dev team for taking my sweet time with the project!
-  * Amplitudes are now in decibels, which is unambiguous
+* My own latest [cq_kernels](https://github.com/colonelwatch/cq_kernel) library, which integrates kiss_fft into a fast constant Q transform. This gives true logarithmic frequency scaling.
+  * Amplitudes are now in decibels, which is unambiguous though there is no obvious reference
 * Switching to the kiss_fft library, which is faster and has a permissive license
-* Replacing floating-point sqrt() with recursive integer-based square root and other optimizations
+* Replacing floating-point sqrt() with integer-based square root and other optimizations
 * Improved semantics
 
-If you are adjusting the settings, banding in the output means the FFT size is too small, however keep in mind that 
-performance (refresh rate) and resolution (FFT size) are in a balance.
+If you are adjusting the settings, banding in the output means the FFT size is too small, however keep in mind that performance (refresh rate) and resolution (FFT size) are in a balance.
 
 Here are some goals toward expanding room for both:
 * I2S sampling, to eliminate sampling overhead
 * Newton's square root, if it helps
 
-Finally, a note on the attached schematic: this was NOT designed for line-level audio. Rather, it is
-meant to amplify listening level signals for headphones or earbuds. However, this was tested with a not very
-sensitive pair, so use a smaller resistor for (or short) R7 if you need more gain. Alternatively, raise the
-SENSITIVITY setting in the code.
+Finally, a note on the attached schematic: this was NOT designed for line-level audio. Rather, it is meant to amplify listening level signals for headphones or earbuds. However, this was tested with a not very sensitive pair, so use a smaller resistor for (or short) R7 if you need more gain. Alternatively, raise the SENSITIVITY setting in the code.
 
 ![Amplification circuit](/images/amplification.png)

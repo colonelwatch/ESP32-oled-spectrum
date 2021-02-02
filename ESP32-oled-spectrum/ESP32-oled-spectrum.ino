@@ -32,7 +32,7 @@
 #define TIME_FACTOR 3.0               // Configures rise smoothing (factor of exponential
                                       //  moving average)
 #define TIME_FACTOR2 3.0              // Configures fall smoothing (same as above)
-#define THRESHOLD -50                 // dB, minimum display value
+#define THRESHOLD -70                 // dB, minimum display value
 #define CAP -30                       // dB, maximum display value
 // Device settings
 #define COLUMNS 32                    // Number of columns to display (fewer columns will

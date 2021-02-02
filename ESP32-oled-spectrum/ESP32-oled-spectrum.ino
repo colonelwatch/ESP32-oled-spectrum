@@ -50,8 +50,17 @@ const float anti_coeff = (TIME_FACTOR-1.)/TIME_FACTOR;
 const float coeff2 = 1./TIME_FACTOR2;               // Coefficients for fall smoothing
 const float anti_coeff2 = (TIME_FACTOR2-1.)/TIME_FACTOR2;
 const int sample_period = 1000000/SAMPLING_FREQUENCY;
+struct cq_kernel_cfg cq_cfg = { // Holds config for all cq_kernels functions to access
+  .samples = SAMPLES,
+  .bands = COLUMNS,
+  .fmin = MIN_FREQUENCY,
+  .fmax = MAX_FREQUENCY,
+  .fs = SAMPLING_FREQUENCY,
+  .min_val = MINVAL
+};
 
 /* Global variables */
+cq_kernels_t kernels; // Will point to kernels allocated in dynamic memory
 // Benchmarking variables
 int frames;
 volatile int refresh;
@@ -130,17 +139,6 @@ void IRAM_ATTR onTimer(){
 /* Core 0 thread */
 TaskHandle_t Task1;
 void Task1code( void * pvParameters ){
-  // Initializes cq_kernels and generates kernels
-  struct cq_kernel_cfg cq_cfg = {
-    .samples = SAMPLES,
-    .bands = COLUMNS,
-    .fmin = MIN_FREQUENCY,
-    .fmax = MAX_FREQUENCY,
-    .fs = SAMPLING_FREQUENCY,
-    .min_val = MINVAL
-  };
-  cq_kernels_t kernels = generate_kernels(cq_cfg);
-
   // Initializes sampling interrupt
   timer = timerBegin(1, 80, true);
   timerAttachInterrupt(timer, &onTimer, true);
@@ -241,6 +239,10 @@ void setup() {
     display.begin(SSD1306_SWITCHCAPVCC, 0x3C);
     display.clearDisplay();
     display.display();
+    
+    // Generate kernels (memory-intensive task) before allocating core 0 stack
+    kernels = generate_kernels(cq_cfg);
+    kernels = reallocate_kernels(kernels, cq_cfg);
     
     xTaskCreatePinnedToCore(
               Task1code,   /* Task function. */

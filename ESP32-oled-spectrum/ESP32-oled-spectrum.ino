@@ -114,7 +114,7 @@ int16_t int_sqrt(int32_t val);
 void calculate_Hann(int16_t window[], int N);
 void apply_window(int16_t in[], int16_t window[], int N);
 
-/* Core 0 Interrupt thread */
+/* Sampling interrupt */
 hw_timer_t * timer = NULL;
 void IRAM_ATTR onTimer(){
   // Basic function is to insert new values for circular analogBuffer, but in cases where
@@ -139,12 +139,6 @@ void IRAM_ATTR onTimer(){
 /* Core 0 thread */
 TaskHandle_t Task1;
 void Task1code( void * pvParameters ){
-  // Initializes sampling interrupt
-  timer = timerBegin(1, 80, true);
-  timerAttachInterrupt(timer, &onTimer, true);
-  timerAlarmWrite(timer, sample_period, true);
-  timerAlarmEnable(timer);
-
   // Initializes kiss_fftr and window
   int16_t window[SAMPLES];
   calculate_Hann(window, SAMPLES);
@@ -243,6 +237,12 @@ void setup() {
     // Generate kernels (memory-intensive task) before allocating core 0 stack
     kernels = generate_kernels(cq_cfg);
     kernels = reallocate_kernels(kernels, cq_cfg);
+
+    // Initializes sampling interrupt
+    timer = timerBegin(1, 80, true);
+    timerAttachInterrupt(timer, &onTimer, true);
+    timerAlarmWrite(timer, sample_period, true);
+    timerAlarmEnable(timer);
     
     xTaskCreatePinnedToCore(
               Task1code,   /* Task function. */

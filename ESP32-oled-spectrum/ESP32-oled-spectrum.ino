@@ -18,7 +18,7 @@
 
 /* User-configurable settings */
 // FFT settings
-#define SAMPLES 4096                  // Must be a power of 2. Raise for higher resolution
+#define SAMPLES 8192                  // Must be a power of 2. Raise for higher resolution
                                       //  (less banding) and lower for faster performance.
 #define SAMPLING_FREQUENCY 44100      // Hz, changing not recommended
 #define MAX_FREQUENCY 14000           // Hz, must be 1/2 of sampling frequency or less
@@ -35,9 +35,9 @@
 #define THRESHOLD -70                 // dB, minimum display value
 #define CAP -30                       // dB, maximum display value
 // Device settings
-#define COLUMNS 32                    // Number of columns to display (fewer columns will
+#define COLUMNS 64                    // Number of columns to display (fewer columns will
                                       //  cause less banding)
-#define COLUMN_SIZE 2                 // Size of columns in pixels
+#define COLUMN_SIZE 1                 // Size of columns in pixels
 
 #define CLIP_PIN 19  // Connect LED to this pin to get a clipping indicator
 #define INPUT_PIN 36 // Labeled VP
@@ -111,7 +111,7 @@ circularBuffer<int> analogBuffer(SAMPLES);
 
 void watchdogReset();
 int16_t int_sqrt(int32_t val);
-void calculate_Hann(int16_t window[], int N);
+void calculate_Hamming(int16_t window[], int N);
 void apply_window(int16_t in[], int16_t window[], int N);
 
 /* Sampling interrupt */
@@ -141,7 +141,7 @@ TaskHandle_t Task1;
 void Task1code( void * pvParameters ){
   // Initializes kiss_fftr and window
   int16_t window[SAMPLES];
-  calculate_Hann(window, SAMPLES);
+  calculate_Hamming(window, SAMPLES);
   kiss_fftr_cfg cfg = kiss_fftr_alloc(SAMPLES, 0, NULL, NULL);
 
   // Initalize benchmark
@@ -251,8 +251,7 @@ void setup() {
               NULL,        /* parameter of the task */
               0,           /* priority of the task */
               &Task1,      /* Task handle to keep track of created task */
-              0);          /* pin task to core 0 */ 
-    delay(500);
+              0);          /* pin task to core 0 */
 }
 
 void loop() {
@@ -283,10 +282,10 @@ void watchdogReset(){
   TIMERG0.wdt_wprotect=0;
 }
 
-// Calculates Hann window in Q15 form
-void calculate_Hann(int16_t window[], int N){
+// Calculates Hamming window in Q15 form
+void calculate_Hamming(int16_t window[], int N){
   for(int i = 0; i < N; i++){
-    float a0 = 0.5;
+    float a0 = 0.54;
     window[i] = (1<<15)*(a0-(1-a0)*cos(2*PI*i/N));
   }
 }

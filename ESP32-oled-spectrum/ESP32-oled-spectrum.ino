@@ -106,8 +106,6 @@ template <typename TYPE> class circularBuffer{
 };
 circularBuffer<int> analogBuffer(SAMPLES);
 
-void watchdogReset();
-int16_t int_sqrt(int32_t val);
 void calculate_Hamming(int16_t window[], int N);
 void apply_window(int16_t in[], int16_t window[], int N);
 
@@ -182,9 +180,9 @@ void Task1code( void * pvParameters ){
     float out_columns[COLUMNS];
     static float past_columns[COLUMNS];
     for(int i = 0; i < COLUMNS; i++){
-      // Finds decibel value of complex magnitude
-      out_columns[i] = 2*int_sqrt(bands_cpx[i].r*bands_cpx[i].r + bands_cpx[i].i*bands_cpx[i].i);
-      out_columns[i] = 20*(log10(out_columns[i])-log10(1<<15));
+      // Finds decibel value of complex magnitude (relative to 1<<14, apparent maximum)
+      int32_t mag_squared = bands_cpx[i].r*bands_cpx[i].r + bands_cpx[i].i*bands_cpx[i].i;
+      out_columns[i] = 20*(log10(mag_squared)/2-log10(1<<14));
 
       // Converting decibel values into positive values and blocking anything under THRESHOLD
       if(out_columns[i] < THRESHOLD) out_columns[i] = 0;
@@ -264,17 +262,4 @@ void calculate_Hamming(int16_t window[], int N){
 // Applies a window in Q15 form
 void apply_window(int16_t in[], int16_t window[], int N){
   for(int i = 0; i < N; i++) in[i] = (in[i]*window[i])/(1<<15);
-}
-
-// Computes square root and replaces the Arduino-provided sqrt function, which used floating point math.
-// Outputs reasonably fast for any number less than int32_t max but works fastest on smaller numbers.
-int16_t int_sqrt(int32_t val){
-  // Initial values if n = 0
-  int32_t Nsquared = 0;
-  int32_t twoNplus1 = 1;
-  while(Nsquared <= val){
-    Nsquared += twoNplus1;
-    twoNplus1 += 2;
-  }
-  return twoNplus1/2 - 1;
 }

@@ -1,6 +1,6 @@
 # ESP32-oled-spectrum
 
-[![Picture](/images/closeup.jpeg)](https://youtu.be/SY_2s3Fl108)
+[![Picture](/images/closeup.jpeg)](https://youtu.be/_1pETVk4ngk)
 *Click through image to view demonstration on Youtube*
 
 This is a quick adaptation of an old project, [ESP32-dotmatrix-spectrum](https://github.com/colonelwatch/ESP32-dotmatrix-spectrum), into the more accessible OLED. 

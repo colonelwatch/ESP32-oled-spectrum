@@ -108,9 +108,6 @@ template <typename TYPE> class circularBuffer{
 };
 circularBuffer<int> analogBuffer(SAMPLES);
 
-void calculate_Hamming(int16_t window[], int N);
-void apply_window(int16_t in[], int16_t window[], int N);
-
 /* Sampling interrupt */
 hw_timer_t * timer = NULL;
 void IRAM_ATTR onTimer(){
@@ -137,8 +134,6 @@ void IRAM_ATTR onTimer(){
 TaskHandle_t Task1;
 void Task1code( void * pvParameters ){
   // Initializes kiss_fftr and window
-  int16_t window[SAMPLES];
-  calculate_Hamming(window, SAMPLES);
   kiss_fftr_cfg cfg = kiss_fftr_alloc(SAMPLES, 0, NULL, NULL);
 
   // Initalize benchmark
@@ -166,7 +161,6 @@ void Task1code( void * pvParameters ){
    
     // Applies windowing and FFT
     kiss_fft_cpx out[SAMPLES] = {0};
-    apply_window(in, window, SAMPLES);
     kiss_fftr(cfg, in, out);
     
     // Cutting off garbage values with a threshold inversely proportional to SAMPLES
@@ -255,15 +249,4 @@ void loop() {
     display.display();
     
     refresh++;
-}
-
-// Calculates Hamming window in Q15 form
-void calculate_Hamming(int16_t window[], int N){
-  float a0 = 0.54;
-  for(int i = 0; i < N; i++) window[i] = (1<<15)*(a0-(1-a0)*cos(2*PI*i/N));
-}
-
-// Applies a window in Q15 form
-void apply_window(int16_t in[], int16_t window[], int N){
-  for(int i = 0; i < N; i++) in[i] = (in[i]*window[i])/(1<<15);
 }

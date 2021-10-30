@@ -36,7 +36,11 @@ void _generate_kernel(kiss_fft_cpx kernel[], kiss_fftr_cfg cfg, float f, float f
     float factor = f/fmin;
     int hamming_N = N/factor; // Scales inversely with frequency (see CQT paper)
     kiss_fft_scalar *time_K = calloc(N, sizeof(kiss_fft_scalar));
+    #ifdef REALTIME
+    _generate_hamming(&time_K[N-hamming_N], hamming_N);
+    #else
     _generate_hamming(&time_K[(N-hamming_N)/2], hamming_N);
+    #endif
 
     // Fills window with f Hz wave sampled at fs Hz
     for(int i = 0; i < N; i++) time_K[i] *= cos(2*M_PI*(f/fs)*(i-N/2));

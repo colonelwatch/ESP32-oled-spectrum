@@ -1,7 +1,7 @@
 // Copyright 2020 colonelwatch
 
 // Note: This NEEDS the attached platform.local.txt file to compile correctly. 
-//  It sends a preprocessor flag to the kiss_fft library properly. To use it, 
+//  It sends a preprocessor flag to kiss_fft and cq_kernels properly. To use it, 
 //  copy it into:
 //  C:\Users\%USERPROFILE%\AppData\Local\Arduino15\packages\esp32\hardware\esp32\1.0.4
 

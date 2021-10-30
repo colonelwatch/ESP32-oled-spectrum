@@ -1,5 +1,7 @@
 // Copyright 2020 colonelwatch
 
+// Note: This WILL crash if it is compiled with the latest ESP32 core. Downgrade
+//  to version 1.0.4 through the Arduino boards manager before compiling.
 // Note: This NEEDS the attached platform.local.txt file to compile correctly. 
 //  It sends a preprocessor flag to kiss_fft and cq_kernels properly. To use it, 
 //  copy it into:

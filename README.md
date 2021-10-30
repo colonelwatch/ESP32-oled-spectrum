@@ -6,6 +6,8 @@
 This is a quick adaptation of an old project, [ESP32-dotmatrix-spectrum](https://github.com/colonelwatch/ESP32-dotmatrix-spectrum), into the more accessible OLED. 
 I borrowed from another project [attiny85-spectrum](https://github.com/colonelwatch/attiny85-spectrum), but the result was so appealing that I decided to share it!
 
+⚠️ **Disclaimer!** ⚠️ This project will crash if it is compiled with the latest ESP32 core. Downgrade to version 1.0.4 through the Arduino boards manager before compiling.
+
 There are also a number of improvements and notes here that will be carried over to the original project eventually.
 
 That includes:

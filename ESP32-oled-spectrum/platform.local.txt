@@ -1,7 +1,7 @@
-compiler.c.extra_flags= -D FIXED_POINT=16 -D REALTIME
+compiler.c.extra_flags= -D FIXED_POINT=16
 compiler.c.elf.extra_flags=
 compiler.S.extra_flags=
-compiler.cpp.extra_flags= -D FIXED_POINT=16 -D REALTIME
+compiler.cpp.extra_flags= -D FIXED_POINT=16
 compiler.ar.extra_flags=
 compiler.objcopy.eep.extra_flags=
 compiler.elf2hex.extra_flags=

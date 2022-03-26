@@ -16,8 +16,9 @@
 
 /* User-configurable global constants */
 // FFT settings
-#define SAMPLES 8192        // Must be a power of 2. Raise for less banding and 
-                            //  lower for faster performance.
+#define SAMPLES 6144        // Prime factorization should contain as many 2s as 
+                            //  possible. Raise for less banding and lower for 
+                            //  faster performance.
 #define MAX_FREQUENCY 14000 // Hz, must be 1/2 of sampling frequency or less
 #define MIN_FREQUENCY 40    // Hz, cannot be 0, decreasing causes banding
 // Post-processing settings
@@ -38,7 +39,7 @@
 #define SCREEN_WIDTH 128              // pixels, OLED display width
 #define SCREEN_HEIGHT 64              // pixels, OLED display height
 #define SAMPLING_FREQUENCY 44100      // Hz
-#define MINVAL 6500                   // used in cq_kernel
+#define MINVAL 7500                   // used in cq_kernel
 
 /* Other global constants, calculated from #define'd values */
 const float coeff = 1./TIME_FACTOR;

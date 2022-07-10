@@ -2,6 +2,8 @@
 
 // Note: This WILL crash if it is compiled with the latest ESP32 core. Downgrade
 //  to version 1.0.4 through the Arduino boards manager before compiling.
+// Note: This WILL NOT compile with the latest Adafruit BusIO library. Downgrade
+//  to version 1.11.2 through the Arduino boards manager before compiling.
 // Note: This NEEDS the attached platform.local.txt file to compile correctly. 
 //  It sends a preprocessor flag to the kiss_fft library properly. To use it, 
 //  copy it into:

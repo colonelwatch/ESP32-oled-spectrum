@@ -27,7 +27,7 @@
 // Post-processing settings
 #define CUTOFF 20           // Helps determine where to cut low-value noise in
                             //  FFT output. Set as low as the noise will allow.
-#define TIME_FACTOR 3.0     // Output smoothing factor (exponential moving 
+#define TIME_FACTOR 5.0     // Output smoothing factor (exponential moving 
                             //  average alpha), 1.0 for no smoothing
 #define THRESHOLD -70       // dB, minimum display value
 #define CAP -30             // dB, maximum display value
@@ -68,7 +68,7 @@ volatile bool screenBuffer_swap_ready = false;
 doubleBuffer<uint8_t> screenBuffer(COLUMNS);
 fftBuffer<int16_t, SAMPLES, SAMPLES+64> analogBuffer;
 
-/* Sampling interrupt */
+/* Sampling interrupt on Core 0 */
 hw_timer_t *timer = NULL;
 void IRAM_ATTR onTimer(){
     // Basic function is to insert new values for circular analogBuffer. However, 
@@ -84,8 +84,39 @@ void IRAM_ATTR onTimer(){
     analogBuffer.write(&val, 1);
 }
 
-/* Core 0 thread */
-TaskHandle_t Task1;
+/* Core 0 thread - peripherals */
+void Task0code(void *pvParameters){
+    // Initialize sampling interrupt and buffer
+    analogBuffer.alloc();
+    timer = timerBegin(1, 80, true);
+    timerAttachInterrupt(timer, &onTimer, true);
+    timerAlarmWrite(timer, sample_period, true);
+    timerAlarmEnable(timer);
+
+    display.begin(SSD1306_SWITCHCAPVCC, 0x3C);
+    display.clearDisplay();
+    display.display();
+    while(true){
+        if(screenBuffer_swap_ready){
+            screenBuffer.swap();
+            screenBuffer_swap_ready = false;
+        }
+
+        display.clearDisplay();
+        display.drawFastHLine(0, 63, 128, WHITE);
+        const int col_px = 128/COLUMNS;
+        for(int i = 0; i < COLUMNS; i++){
+            int length = screenBuffer.readBuffer[i];
+            display.drawRect(i*col_px-COLUMN_SIZE, 64-length, COLUMN_SIZE, length, WHITE);
+            display.fillRect(i*col_px-COLUMN_SIZE, 64-length, COLUMN_SIZE, length, WHITE);
+        }
+        display.display();
+        
+        refresh++;
+    }
+}
+
+/* Core 1 thread - calculation*/
 void Task1code(void *pvParameters){
     // Allocate some large arrays
     int16_t *in = (int16_t*)malloc(SAMPLES*sizeof(int16_t));
@@ -154,50 +185,21 @@ void Task1code(void *pvParameters){
     }
 }
 
-/* Core 1 thread - run once */
 void setup() {
     Serial.begin(115200);
     
     pinMode(CLIP_PIN, OUTPUT);
     pinMode(INPUT_PIN, INPUT);
-
-    display.begin(SSD1306_SWITCHCAPVCC, 0x3C);
-    display.clearDisplay();
-    display.display();
     
-    // Generate kernels (memory-intensive task) before allocating core 0 stack
+    // Generate kernels (memory-intensive!) before starting any other tasks
     kernels = generate_kernels(cq_cfg);
     kernels = reallocate_kernels(kernels, cq_cfg);
-
-    // after the memory-intensive task, allocate samples memory
-    analogBuffer.alloc();
-
-    // Initializes sampling interrupt
-    timer = timerBegin(1, 80, true);
-    timerAttachInterrupt(timer, &onTimer, true);
-    timerAlarmWrite(timer, sample_period, true);
-    timerAlarmEnable(timer);
     
     // Launches Task1code on core 0 with no parameters (accesses global variables)
-    xTaskCreatePinnedToCore(Task1code, "Task1", 2500, NULL, 0, &Task1, 0);
+    xTaskCreatePinnedToCore(Task0code, "Task0", 2500, NULL, configMAX_PRIORITIES-1, new TaskHandle_t, 0);
+    xTaskCreatePinnedToCore(Task1code, "Task1", 2500, NULL, configMAX_PRIORITIES-1, new TaskHandle_t, 1);
 }
 
-/* Core 1 thread - run forever */
 void loop() {
-    if(screenBuffer_swap_ready){
-        screenBuffer.swap();
-        screenBuffer_swap_ready = false;
-    }
-
-    display.clearDisplay();
-    display.drawFastHLine(0, 63, 128, WHITE);
-    const int col_px = 128/COLUMNS;
-    for(int i = 0; i < COLUMNS; i++){
-        int length = screenBuffer.readBuffer[i];
-        display.drawRect(i*col_px-COLUMN_SIZE, 64-length, COLUMN_SIZE, length, WHITE);
-        display.fillRect(i*col_px-COLUMN_SIZE, 64-length, COLUMN_SIZE, length, WHITE);
-    }
-    display.display();
-    
-    refresh++;
+    vTaskSuspend(NULL); // suspend the arduino loop
 }

@@ -1,4 +1,4 @@
-template <typename TYPE> class doubleBuffer{
+template <typename TYPE, int SIZE> class doubleBuffer{
     public:
         volatile TYPE *readBuffer, *writeBuffer;
         void swap(){
@@ -6,9 +6,9 @@ template <typename TYPE> class doubleBuffer{
             readBuffer = writeBuffer;
             writeBuffer = temp;
         }
-        doubleBuffer(int size){
-            readBuffer = (TYPE*)calloc(size, sizeof(TYPE));
-            writeBuffer = (TYPE*)calloc(size, sizeof(TYPE));
+        void alloc(){
+            readBuffer = (TYPE*)malloc(SIZE*sizeof(TYPE));
+            writeBuffer = (TYPE*)malloc(SIZE*sizeof(TYPE));
         }
 };
 

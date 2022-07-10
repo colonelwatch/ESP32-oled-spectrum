@@ -65,7 +65,7 @@ cq_kernels_t kernels; // Will point to kernels allocated in dynamic memory
 int frames; volatile int refresh; // Benchmarking variables
 
 volatile bool screenBuffer_swap_ready = false;
-doubleBuffer<uint8_t> screenBuffer(COLUMNS);
+doubleBuffer<uint8_t, COLUMNS> screenBuffer;
 fftBuffer<int16_t, SAMPLES, SAMPLES+64> analogBuffer;
 
 /* Sampling interrupt on Core 0 */
@@ -93,9 +93,13 @@ void Task0code(void *pvParameters){
     timerAlarmWrite(timer, sample_period, true);
     timerAlarmEnable(timer);
 
+    screenBuffer.alloc();
     display.begin(SSD1306_SWITCHCAPVCC, 0x3C);
     display.clearDisplay();
     display.display();
+
+    delay(1000); // give time for the other core to allocate memory
+
     while(true){
         if(screenBuffer_swap_ready){
             screenBuffer.swap();
@@ -124,6 +128,8 @@ void Task1code(void *pvParameters){
     kiss_fftr_cfg cfg = kiss_fftr_alloc(SAMPLES, 0, NULL, NULL);
     kiss_fft_cpx *bands_cpx = (kiss_fft_cpx*)malloc(COLUMNS*sizeof(kiss_fft_cpx));
     float *past_dB_level = (float*)calloc(COLUMNS, sizeof(float));
+
+    delay(1000); // give time for the other core to allocate memory
 
     // Initalize benchmark
     float currentMillis = millis();

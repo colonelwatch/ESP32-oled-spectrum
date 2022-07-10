@@ -13,6 +13,7 @@
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
 
+#include "buffer.h"
 #include "kiss_fftr.h"
 #include "cq_kernel.h"
 
@@ -63,49 +64,9 @@ Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1, 1000000UL);
 cq_kernels_t kernels; // Will point to kernels allocated in dynamic memory
 int frames; volatile int refresh; // Benchmarking variables
 
-template <typename TYPE> class doubleBuffer{
-    public:
-        volatile TYPE *readBuffer, *writeBuffer;
-        volatile bool swap_ready = false;
-        void swap(){
-            volatile TYPE *temp = readBuffer;
-            readBuffer = writeBuffer;
-            writeBuffer = temp;
-        }
-        doubleBuffer(int size){
-            readBuffer = (TYPE*)calloc(size, sizeof(TYPE));
-            writeBuffer = (TYPE*)calloc(size, sizeof(TYPE));
-        }
-};
+volatile bool screenBuffer_swap_ready = false;
 doubleBuffer<uint8_t> screenBuffer(COLUMNS);
-
-template <typename TYPE> class circularBuffer{
-    public:
-        int buffer_size;
-        volatile TYPE *buffer;
-        volatile int read_index = 0;
-        volatile int write_index = 0;
-        volatile bool available = true;
-        void insert(TYPE val){
-            buffer[write_index] = val;
-            write_index++;
-            write_index %= buffer_size;
-        }
-        TYPE pop(){
-            TYPE val = buffer[read_index];
-            read_index++;
-            read_index %= buffer_size;
-            return val;
-        }
-        bool empty(){
-            return read_index == write_index;
-        }
-        circularBuffer(int size){
-            buffer_size = size;
-            buffer = (TYPE*)calloc(size, sizeof(TYPE));
-        }
-};
-circularBuffer<int> analogBuffer(SAMPLES), contigBuffer(512);
+fftBuffer<int16_t, SAMPLES, SAMPLES+64> analogBuffer;
 
 /* Sampling interrupt */
 hw_timer_t *timer = NULL;
@@ -114,16 +75,13 @@ void IRAM_ATTR onTimer(){
     // if the interrupt is triggered as analogBuffer is being read, the new value 
     // is stashed in contigBuffer and inserted later.
 
-    int val = analogRead(INPUT_PIN);
+    int16_t val = analogRead(INPUT_PIN);
 
     if(val > 4000) digitalWrite(CLIP_PIN, HIGH);
     else digitalWrite(CLIP_PIN, LOW);
 
-    if(!analogBuffer.available) contigBuffer.insert(val);
-    else{
-        while(!contigBuffer.empty()) analogBuffer.insert(contigBuffer.pop());
-        analogBuffer.insert(val);
-    }
+    val = 16*(val-2048); // rescale into 16-bit range
+    analogBuffer.write(&val, 1);
 }
 
 /* Core 0 thread */
@@ -145,14 +103,9 @@ void Task1code(void *pvParameters){
         // Reads ENTIRE analogBuffer starting from analogBuffer.write_index, 
         //  this means a lot of overlap, but it decouples FFT calculations from 
         //  sampling
-        analogBuffer.available = false;   // Closes off buffer to prevent corruption
         int32_t sum = 0;
-        for(int i = 0; i < SAMPLES; i++){
-            int val = analogBuffer.buffer[(i+analogBuffer.write_index)%SAMPLES];
-            in[i] = 16*(val-2048);
-            sum += in[i];
-        }
-        analogBuffer.available = true;    // Restores access to buffer
+        analogBuffer.read(in);
+        for(int i = 0; i < SAMPLES; i++) sum += in[i];
         
         int16_t avg = sum/SAMPLES;
         for(int i = 0; i < SAMPLES; i++){
@@ -187,7 +140,7 @@ void Task1code(void *pvParameters){
             // Translates output data into column heights, which is entered into the buffer
             screenBuffer.writeBuffer[i] = 64*dB_level/(CAP-THRESHOLD);
         }
-        screenBuffer.swap_ready = true;   // Raises flag to indicate buffer is ready to push
+        screenBuffer_swap_ready = true;   // Raises flag to indicate buffer is ready to push
 
         // Outputs benchmark data
         frames++;
@@ -216,6 +169,9 @@ void setup() {
     kernels = generate_kernels(cq_cfg);
     kernels = reallocate_kernels(kernels, cq_cfg);
 
+    // after the memory-intensive task, allocate samples memory
+    analogBuffer.alloc();
+
     // Initializes sampling interrupt
     timer = timerBegin(1, 80, true);
     timerAttachInterrupt(timer, &onTimer, true);
@@ -228,9 +184,9 @@ void setup() {
 
 /* Core 1 thread - run forever */
 void loop() {
-    if(screenBuffer.swap_ready){
+    if(screenBuffer_swap_ready){
         screenBuffer.swap();
-        screenBuffer.swap_ready = false;
+        screenBuffer_swap_ready = false;
     }
 
     display.clearDisplay();

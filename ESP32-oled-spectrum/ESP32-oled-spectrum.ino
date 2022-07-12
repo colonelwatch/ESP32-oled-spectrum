@@ -9,6 +9,7 @@
 //  copy it into:
 //  C:\Users\%USERPROFILE%\AppData\Local\Arduino15\packages\esp32\hardware\esp32\1.0.4
 
+#include <driver/i2s.h>
 #include <Wire.h>
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
@@ -58,49 +59,67 @@ struct cq_kernel_cfg cq_cfg = { // config for cq_kernel
     .fs = SAMPLING_FREQUENCY,
     .min_val = MINVAL
 };
+const i2s_config_t i2s_cfg = {
+    .mode = (i2s_mode_t)( I2S_MODE_MASTER | I2S_MODE_RX | I2S_MODE_ADC_BUILT_IN ),
+    .sample_rate = SAMPLING_FREQUENCY,
+    .bits_per_sample = I2S_BITS_PER_SAMPLE_16BIT,
+    .channel_format = I2S_CHANNEL_FMT_ONLY_LEFT,
+    .communication_format = I2S_COMM_FORMAT_I2S_LSB,
+    .intr_alloc_flags = ESP_INTR_FLAG_LEVEL1,
+    .dma_buf_count = 2,
+    .dma_buf_len = 128,
+    .use_apll = false,
+    .tx_desc_auto_clear = false,
+    .fixed_mclk = 0,
+};
 
 /* Global variables */
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1, 1000000UL);
 cq_kernels_t kernels; // Will point to kernels allocated in dynamic memory
-int frames; volatile int refresh; // Benchmarking variables
+int frames; volatile int refresh; volatile int polls; // Benchmarking variables
 
 volatile bool screenBuffer_swap_ready = false;
 doubleBuffer<uint8_t, COLUMNS> screenBuffer;
-fftBuffer<int16_t, SAMPLES, SAMPLES+64> analogBuffer;
+fftBuffer<int16_t, SAMPLES, SAMPLES+2048> analogBuffer;
 
-/* Sampling interrupt on Core 0 */
-hw_timer_t *timer = NULL;
-void IRAM_ATTR onTimer(){
-    // Basic function is to insert new values for circular analogBuffer. However, 
-    // if the interrupt is triggered as analogBuffer is being read, the new value 
-    // is stashed in contigBuffer and inserted later.
+void audio_Task_routine(void *pvParameters){
+    analogBuffer.alloc();
+    int16_t *samples = (int16_t*)malloc(sizeof(int16_t)*128);
+    i2s_driver_install(I2S_NUM_0, &i2s_cfg, 0, NULL);
+    i2s_set_adc_mode(ADC_UNIT_1, ADC1_CHANNEL_0);
+    i2s_adc_enable(I2S_NUM_0);
 
-    int16_t val = analogRead(INPUT_PIN);
+    delay(1000);
 
-    if(val > 4000) digitalWrite(CLIP_PIN, HIGH);
-    else digitalWrite(CLIP_PIN, LOW);
+    while(true){
+        delay(1); // give time for the other tasks to allocate memory
 
-    val = 16*(val-2048); // rescale into 16-bit range
-    analogBuffer.write(&val, 1);
+        size_t bytes_read = 0;
+        i2s_read(I2S_NUM_0, samples, sizeof(int16_t)*88, &bytes_read, portMAX_DELAY);
+        int samples_read = bytes_read/sizeof(int16_t);
+        for(int i = 0; i < samples_read; i++) samples[i] = 16*(samples[i]-2048); // scale into 16-bit signed
+        for(int i = 0; i < samples_read; i += 2){ // even and odd samples are switched for some reason
+            int16_t temp = samples[i];
+            samples[i] = samples[i+1];
+            samples[i+1] = temp;
+        }
+        analogBuffer.write(samples, samples_read);
+
+        polls++;
+    }
 }
 
-/* Core 0 thread - peripherals */
-void Task0code(void *pvParameters){
-    // Initialize sampling interrupt and buffer
-    analogBuffer.alloc();
-    timer = timerBegin(1, 80, true);
-    timerAttachInterrupt(timer, &onTimer, true);
-    timerAlarmWrite(timer, sample_period, true);
-    timerAlarmEnable(timer);
-
+void screen_Task_routine(void *pvParameters){
     screenBuffer.alloc();
     display.begin(SSD1306_SWITCHCAPVCC, 0x3C);
     display.clearDisplay();
     display.display();
 
-    delay(1000); // give time for the other core to allocate memory
+    delay(1000); // give time for the other tasks to allocate memory
 
     while(true){
+        delay(1); // give time for the IDLE task (including watchdog)
+
         if(screenBuffer_swap_ready){
             screenBuffer.swap();
             screenBuffer_swap_ready = false;
@@ -120,8 +139,7 @@ void Task0code(void *pvParameters){
     }
 }
 
-/* Core 1 thread - calculation*/
-void Task1code(void *pvParameters){
+void comp_Task_routine(void *pvParameters){
     // Allocate some large arrays
     int16_t *in = (int16_t*)malloc(SAMPLES*sizeof(int16_t));
     kiss_fft_cpx *out = (kiss_fft_cpx*)malloc(SAMPLES*sizeof(kiss_fft_cpx));
@@ -129,7 +147,7 @@ void Task1code(void *pvParameters){
     kiss_fft_cpx *bands_cpx = (kiss_fft_cpx*)malloc(COLUMNS*sizeof(kiss_fft_cpx));
     float *past_dB_level = (float*)calloc(COLUMNS, sizeof(float));
 
-    delay(1000); // give time for the other core to allocate memory
+    delay(1000); // give time for the other tasks to allocate memory
 
     // Initalize benchmark
     float currentMillis = millis();
@@ -185,7 +203,9 @@ void Task1code(void *pvParameters){
         if(millis()-currentMillis > 5000 && !benchmark_posted){
             Serial.print(frames/5);
             Serial.print(' ');
-            Serial.println(refresh/5);
+            Serial.print(refresh/5);
+            Serial.print(' ');
+            Serial.println(polls/5);
             benchmark_posted = true;
         }
     }
@@ -201,9 +221,10 @@ void setup() {
     kernels = generate_kernels(cq_cfg);
     kernels = reallocate_kernels(kernels, cq_cfg);
     
-    // Launches Task1code on core 0 with no parameters (accesses global variables)
-    xTaskCreatePinnedToCore(Task0code, "Task0", 2500, NULL, configMAX_PRIORITIES-1, new TaskHandle_t, 0);
-    xTaskCreatePinnedToCore(Task1code, "Task1", 2500, NULL, configMAX_PRIORITIES-1, new TaskHandle_t, 1);
+    // Launches comp_Task_routine on core 0 with no parameters (accesses global variables)
+    xTaskCreatePinnedToCore(audio_Task_routine, "audio", 2500, NULL, configMAX_PRIORITIES-1, new TaskHandle_t, 0);
+    xTaskCreatePinnedToCore(screen_Task_routine, "screen", 2500, NULL, configMAX_PRIORITIES-2, new TaskHandle_t, 0);
+    xTaskCreatePinnedToCore(comp_Task_routine, "comp", 2500, NULL, configMAX_PRIORITIES-1, new TaskHandle_t, 1);
 }
 
 void loop() {

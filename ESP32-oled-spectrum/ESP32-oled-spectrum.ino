@@ -1,13 +1,9 @@
 // Copyright 2020 colonelwatch
 
-// Note: This WILL crash if it is compiled with the latest ESP32 core. Downgrade
-//  to version 1.0.4 through the Arduino boards manager before compiling.
-// Note: This WILL NOT compile with the latest Adafruit BusIO library. Downgrade
-//  to version 1.11.2 through the Arduino boards manager before compiling.
 // Note: This NEEDS the attached platform.local.txt file to compile correctly. 
 //  It sends a preprocessor flag to the kiss_fft library properly. To use it, 
 //  copy it into:
-//  C:\Users\%USERPROFILE%\AppData\Local\Arduino15\packages\esp32\hardware\esp32\1.0.4
+//  C:\Users\%USERPROFILE%\AppData\Local\Arduino15\packages\esp32\hardware\esp32\2.0.4
 
 #include <driver/i2s.h>
 #include <Wire.h>
@@ -50,7 +46,6 @@ const float coeff = 1./TIME_FACTOR;
 const float anti_coeff = (TIME_FACTOR-1.)/TIME_FACTOR;
 const int16_t minimum_mag = 2048*CUTOFF/SAMPLES; // in FFT value
 const int32_t minimum_mag_squared = minimum_mag*minimum_mag;
-const int sample_period = 1000000/SAMPLING_FREQUENCY;
 struct cq_kernel_cfg cq_cfg = { // config for cq_kernel
     .samples = SAMPLES,
     .bands = COLUMNS,
@@ -64,7 +59,7 @@ const i2s_config_t i2s_cfg = {
     .sample_rate = SAMPLING_FREQUENCY,
     .bits_per_sample = I2S_BITS_PER_SAMPLE_16BIT,
     .channel_format = I2S_CHANNEL_FMT_ONLY_LEFT,
-    .communication_format = I2S_COMM_FORMAT_I2S_LSB,
+    .communication_format = I2S_COMM_FORMAT_STAND_I2S,
     .intr_alloc_flags = ESP_INTR_FLAG_LEVEL1,
     .dma_buf_count = 2,
     .dma_buf_len = 128,

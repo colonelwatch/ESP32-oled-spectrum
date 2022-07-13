@@ -24,7 +24,7 @@
 // Post-processing settings
 #define CUTOFF 20           // Helps determine where to cut low-value noise in
                             //  FFT output. Set as low as the noise will allow.
-#define TIME_FACTOR 5.0     // Output smoothing factor (exponential moving 
+#define TIME_FACTOR 2.25     // Output smoothing factor (exponential moving 
                             //  average alpha), 1.0 for no smoothing
 #define THRESHOLD -70       // dB, minimum display value
 #define CAP -30             // dB, maximum display value
@@ -140,7 +140,10 @@ void comp_Task_routine(void *pvParameters){
     kiss_fft_cpx *out = (kiss_fft_cpx*)malloc(SAMPLES*sizeof(kiss_fft_cpx));
     kiss_fftr_cfg cfg = kiss_fftr_alloc(SAMPLES, 0, NULL, NULL);
     kiss_fft_cpx *bands_cpx = (kiss_fft_cpx*)malloc(COLUMNS*sizeof(kiss_fft_cpx));
-    float *past_dB_level = (float*)calloc(COLUMNS, sizeof(float));
+
+    float *y_1 = (float*)calloc(COLUMNS, sizeof(float)),
+          *x_1 = (float*)calloc(COLUMNS, sizeof(float)),
+          *a_1 = (float*)calloc(COLUMNS, sizeof(float));
 
     delay(1000); // give time for the other tasks to allocate memory
 
@@ -195,18 +198,20 @@ void comp_Task_routine(void *pvParameters){
         for(int i = 0; i < COLUMNS; i++){
             // Finds decibel value of complex magnitude (relative to 1<<14, apparent maximum)
             int32_t mag_squared = bands_cpx[i].r*bands_cpx[i].r+bands_cpx[i].i*bands_cpx[i].i;
-            float dB_level = 20*(log10(mag_squared)*0.5-log10(1<<14));
+            float x = 20*(log10(mag_squared)*0.5f-log10(1<<14)); // decibel level, reference is arbitrary
 
             // Makes decibel values into positive values and blocking anything under THRESHOLD
-            if(dB_level < THRESHOLD) dB_level = 0;
-            else dB_level -= THRESHOLD;
+            if(x < THRESHOLD) x = 0;
+            else x -= THRESHOLD;
             
-            // Exponential moving average smoothing
-            dB_level = past_dB_level[i]*anti_coeff+dB_level*coeff;
-            past_dB_level[i] = dB_level;
+            float a = a_1[i]*anti_coeff+x*(coeff*0.5f)+x_1[i]*(coeff*0.5f);
+            float y = y_1[i]*anti_coeff+a*(coeff*0.5f)+a_1[i]*(coeff*0.5f);
+            y_1[i] = y;
+            x_1[i] = x;
+            a_1[i] = a;
         
             // Translates output data into column heights, which is entered into the buffer
-            screenBuffer.writeBuffer[i] = 64*dB_level*(1.0/(CAP-THRESHOLD));
+            screenBuffer.writeBuffer[i] = 64*y*(1.0f/(CAP-THRESHOLD));
         }
         screenBuffer_swap_ready = true;   // Raises flag to indicate buffer is ready to push
 

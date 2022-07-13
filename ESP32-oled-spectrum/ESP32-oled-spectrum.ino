@@ -195,7 +195,7 @@ void comp_Task_routine(void *pvParameters){
         for(int i = 0; i < COLUMNS; i++){
             // Finds decibel value of complex magnitude (relative to 1<<14, apparent maximum)
             int32_t mag_squared = bands_cpx[i].r*bands_cpx[i].r+bands_cpx[i].i*bands_cpx[i].i;
-            float dB_level = 20*(log10(mag_squared)/2-log10(1<<14));
+            float dB_level = 20*(log10(mag_squared)*0.5-log10(1<<14));
 
             // Makes decibel values into positive values and blocking anything under THRESHOLD
             if(dB_level < THRESHOLD) dB_level = 0;
@@ -206,7 +206,7 @@ void comp_Task_routine(void *pvParameters){
             past_dB_level[i] = dB_level;
         
             // Translates output data into column heights, which is entered into the buffer
-            screenBuffer.writeBuffer[i] = 64*dB_level/(CAP-THRESHOLD);
+            screenBuffer.writeBuffer[i] = 64*dB_level*(1.0/(CAP-THRESHOLD));
         }
         screenBuffer_swap_ready = true;   // Raises flag to indicate buffer is ready to push
 

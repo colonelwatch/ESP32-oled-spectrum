@@ -7,6 +7,7 @@
 
 #include <driver/i2s.h>
 #include <Wire.h>
+// #include <SPI.h>
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
 
@@ -70,6 +71,7 @@ const i2s_config_t i2s_cfg = {
 
 /* Global variables */
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1, 1000000UL);
+// Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &SPI, 16, 17, 5, 10000000UL);
 cq_kernels_t kernels; // Will point to kernels allocated in dynamic memory
 int frames; volatile int refresh; volatile int polls; // Benchmarking variables
 

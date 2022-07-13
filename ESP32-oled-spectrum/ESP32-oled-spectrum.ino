@@ -145,11 +145,23 @@ void comp_Task_routine(void *pvParameters){
     delay(1000); // give time for the other tasks to allocate memory
 
     // Initalize benchmark
-    float currentMillis = millis();
-    refresh = 0;
-    frames = 0;
-    
+    unsigned long currentMillis;
+    unsigned long timestamps[5] = {0}; // 0 means not recorded yet
+    bool benchmark_started = false;
+    bool benchmark_posted = false;
+
     while(true){
+        // begin benchmarking over 5 seconds
+        if(!benchmark_posted && !benchmark_started){
+            refresh = 0;
+            frames = 0;
+            polls = 0;
+            currentMillis = millis();
+            benchmark_started = true;
+        }
+        
+        if(!timestamps[0]) timestamps[0] = micros(); // run-once timestamping
+        
         // Reads ENTIRE analogBuffer starting from analogBuffer.write_index, 
         //  this means a lot of overlap, but it decouples FFT calculations from 
         //  sampling
@@ -162,8 +174,12 @@ void comp_Task_routine(void *pvParameters){
             in[i] -= avg;
             out[i] = (kiss_fft_cpx){0, 0}; // necessary before calling kiss_fftr
         }
+
+        if(!timestamps[1]) timestamps[1] = micros();
       
         kiss_fftr(cfg, in, out);
+
+        if(!timestamps[2]) timestamps[2] = micros();
         
         // Cutting off noise with a threshold inversely proportional to SAMPLES
         for(int i = 0; i < SAMPLES; i++)
@@ -173,6 +189,8 @@ void comp_Task_routine(void *pvParameters){
         // Convert FFT output to Constant Q output using cq_kernel
         for(int i = 0; i < COLUMNS; i++) bands_cpx[i] = (kiss_fft_cpx){0, 0};
         apply_kernels(out, bands_cpx, kernels, cq_cfg);
+
+        if(!timestamps[3]) timestamps[3] = micros();
 
         for(int i = 0; i < COLUMNS; i++){
             // Finds decibel value of complex magnitude (relative to 1<<14, apparent maximum)
@@ -192,15 +210,24 @@ void comp_Task_routine(void *pvParameters){
         }
         screenBuffer_swap_ready = true;   // Raises flag to indicate buffer is ready to push
 
+        if(!timestamps[4]) timestamps[4] = micros();
+
         // Outputs benchmark data
         frames++;
-        static bool benchmark_posted = false;
-        if(millis()-currentMillis > 5000 && !benchmark_posted){
+        if(millis()-currentMillis > 5000 && benchmark_started && !benchmark_posted){
+            for(int i = 1; i < 5; i++){
+                Serial.print(timestamps[i]-timestamps[i-1]);
+                Serial.print(' ');
+            }
+            Serial.println();
+
             Serial.print(frames/5);
             Serial.print(' ');
             Serial.print(refresh/5);
             Serial.print(' ');
             Serial.println(polls/5);
+
+            benchmark_started = false;
             benchmark_posted = true;
         }
     }

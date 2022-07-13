@@ -125,7 +125,6 @@ void screen_Task_routine(void *pvParameters){
         const int col_px = 128/COLUMNS;
         for(int i = 0; i < COLUMNS; i++){
             int length = screenBuffer.readBuffer[i];
-            display.drawRect(i*col_px-COLUMN_SIZE, 64-length, COLUMN_SIZE, length, WHITE);
             display.fillRect(i*col_px-COLUMN_SIZE, 64-length, COLUMN_SIZE, length, WHITE);
         }
         display.display();

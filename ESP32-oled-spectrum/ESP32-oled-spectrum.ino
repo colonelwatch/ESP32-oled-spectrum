@@ -58,7 +58,7 @@ const i2s_config_t i2s_cfg = {
     .communication_format = I2S_COMM_FORMAT_STAND_I2S,
     .intr_alloc_flags = ESP_INTR_FLAG_LEVEL1,
     .dma_buf_count = 2,
-    .dma_buf_len = 128,
+    .dma_buf_len = 512,
     .use_apll = false,
     .tx_desc_auto_clear = false,
     .fixed_mclk = 0,
@@ -68,39 +68,11 @@ const i2s_config_t i2s_cfg = {
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1, 1000000UL);
 // Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &SPI, 16, 17, 5, 10000000UL);
 cq_kernels_t kernels; // Will point to kernels allocated in dynamic memory
-int frames; volatile int refresh; volatile int polls; // Benchmarking variables
+int frames; volatile int refresh; // Benchmarking variables
 
 volatile bool screenBuffer_swap_ready = false;
 doubleBuffer<uint8_t, COLUMNS> screenBuffer;
-fftBuffer<float, SAMPLES, SAMPLES+512> analogBuffer;
-
-void audio_Task_routine(void *pvParameters){
-    analogBuffer.alloc();
-    int16_t *samples_raw = (int16_t*)malloc(sizeof(int16_t)*128);
-    float *samples = (float*)malloc(sizeof(float)*128);
-    i2s_driver_install(I2S_NUM_0, &i2s_cfg, 0, NULL);
-    i2s_set_adc_mode(ADC_UNIT_1, ADC1_CHANNEL_0);
-    i2s_adc_enable(I2S_NUM_0);
-
-    delay(1000);
-
-    while(true){
-        delay(1); // give time for the other tasks to allocate memory
-
-        size_t bytes_read = 0;
-        i2s_read(I2S_NUM_0, samples_raw, sizeof(int16_t)*88, &bytes_read, portMAX_DELAY);
-        int samples_read = bytes_read/sizeof(int16_t);
-        for(int i = 0; i < samples_read; i++) samples[i] = (float)(samples_raw[i]-2048)*(1.0f/2048.0f);
-        for(int i = 0; i < samples_read; i += 2){ // even and odd samples are switched for some reason
-            float temp = samples[i];
-            samples[i] = samples[i+1];
-            samples[i+1] = temp;
-        }
-        analogBuffer.write(samples, samples_read);
-
-        polls++;
-    }
-}
+fftBuffer<float, SAMPLES> analogBuffer;
 
 void screen_Task_routine(void *pvParameters){
     screenBuffer.alloc();
@@ -138,6 +110,14 @@ void comp_Task_routine(void *pvParameters){
     kiss_fftr_cfg cfg = kiss_fftr_alloc(SAMPLES, 0, NULL, NULL);
     kiss_fft_cpx *bands_cpx = (kiss_fft_cpx*)malloc(COLUMNS*sizeof(kiss_fft_cpx));
 
+    // Initialize I2S sampling
+    analogBuffer.alloc();
+    int16_t *samples_raw = (int16_t*)malloc(sizeof(int16_t)*512);
+    float *samples = (float*)malloc(sizeof(float)*512);
+    i2s_driver_install(I2S_NUM_0, &i2s_cfg, 0, NULL);
+    i2s_set_adc_mode(ADC_UNIT_1, ADC1_CHANNEL_0);
+    i2s_adc_enable(I2S_NUM_0);
+
     float *y_1 = (float*)calloc(COLUMNS, sizeof(float)),
           *x_1 = (float*)calloc(COLUMNS, sizeof(float)),
           *a_1 = (float*)calloc(COLUMNS, sizeof(float));
@@ -155,12 +135,22 @@ void comp_Task_routine(void *pvParameters){
         if(!benchmark_posted && !benchmark_started){
             refresh = 0;
             frames = 0;
-            polls = 0;
             currentMillis = millis();
             benchmark_started = true;
         }
         
         if(!timestamps[0]) timestamps[0] = micros(); // run-once timestamping
+
+        size_t bytes_read = 0;
+        i2s_read(I2S_NUM_0, samples_raw, sizeof(int16_t)*308, &bytes_read, portMAX_DELAY); // blocking call down to ~142Hz
+        int samples_read = bytes_read/sizeof(int16_t);
+        for(int i = 0; i < samples_read; i++) samples[i] = (float)(samples_raw[i]-2048)*(1.0f/2048.0f);
+        for(int i = 0; i < samples_read; i += 2){ // even and odd samples are switched for some reason
+            float temp = samples[i];
+            samples[i] = samples[i+1];
+            samples[i+1] = temp;
+        }
+        analogBuffer.write(samples, samples_read);
         
         // Reads ENTIRE analogBuffer starting from analogBuffer.write_index, 
         //  this means a lot of overlap, but it decouples FFT calculations from 
@@ -225,9 +215,7 @@ void comp_Task_routine(void *pvParameters){
 
             Serial.print(frames/5);
             Serial.print(' ');
-            Serial.print(refresh/5);
-            Serial.print(' ');
-            Serial.println(polls/5);
+            Serial.println(refresh/5);
 
             benchmark_started = false;
             benchmark_posted = true;
@@ -246,8 +234,7 @@ void setup() {
     kernels = reallocate_kernels(kernels, cq_cfg);
     
     // Launches comp_Task_routine on core 0 with no parameters (accesses global variables)
-    xTaskCreatePinnedToCore(audio_Task_routine, "audio", 2500, NULL, configMAX_PRIORITIES-1, new TaskHandle_t, 0);
-    xTaskCreatePinnedToCore(screen_Task_routine, "screen", 2500, NULL, configMAX_PRIORITIES-2, new TaskHandle_t, 0);
+    xTaskCreatePinnedToCore(screen_Task_routine, "screen", 2500, NULL, configMAX_PRIORITIES-1, new TaskHandle_t, 0);
     xTaskCreatePinnedToCore(comp_Task_routine, "comp", 2500, NULL, configMAX_PRIORITIES-1, new TaskHandle_t, 1);
 }
 

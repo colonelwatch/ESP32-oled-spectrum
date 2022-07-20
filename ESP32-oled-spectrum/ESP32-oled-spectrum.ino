@@ -1,10 +1,5 @@
 // Copyright 2020 colonelwatch
 
-// Note: This NEEDS the attached platform.local.txt file to compile correctly. 
-//  It sends a preprocessor flag to the kiss_fft library properly. To use it, 
-//  copy it into:
-//  C:\Users\%USERPROFILE%\AppData\Local\Arduino15\packages\esp32\hardware\esp32\2.0.4
-
 #include <driver/i2s.h>
 #include <Wire.h>
 // #include <SPI.h>
@@ -23,12 +18,12 @@
 #define MAX_FREQUENCY 14000 // Hz, must be 1/2 of sampling frequency or less
 #define MIN_FREQUENCY 40    // Hz, cannot be 0, decreasing causes banding
 // Post-processing settings
-#define CUTOFF 20           // Helps determine where to cut low-value noise in
+#define CUTOFF 15.0f        // Helps determine where to cut low-value noise in
                             //  FFT output. Set as low as the noise will allow.
 #define TIME_FACTOR 2.25     // Output smoothing factor (exponential moving 
                             //  average alpha), 1.0 for no smoothing
-#define THRESHOLD -70       // dB, minimum display value
-#define CAP -30             // dB, maximum display value
+#define THRESHOLD 5         // dB, minimum display value
+#define CAP 45              // dB, maximum display value
 // Device settings
 #define COLUMNS 64          // Number of columns to display (fewer columns will
                             //  cause less banding)
@@ -40,7 +35,7 @@
 #define SCREEN_WIDTH 128              // pixels, OLED display width
 #define SCREEN_HEIGHT 64              // pixels, OLED display height
 #define SAMPLING_FREQUENCY 44100      // Hz
-#define MINVAL 7500                   // used in cq_kernel
+#define MINVAL 0.225f                 // used in cq_kernel
 
 /* Other global constants, calculated from #define'd values */
 const float coeff = 1./TIME_FACTOR;
@@ -77,11 +72,12 @@ int frames; volatile int refresh; volatile int polls; // Benchmarking variables
 
 volatile bool screenBuffer_swap_ready = false;
 doubleBuffer<uint8_t, COLUMNS> screenBuffer;
-fftBuffer<int16_t, SAMPLES, SAMPLES+2048> analogBuffer;
+fftBuffer<float, SAMPLES, SAMPLES+512> analogBuffer;
 
 void audio_Task_routine(void *pvParameters){
     analogBuffer.alloc();
-    int16_t *samples = (int16_t*)malloc(sizeof(int16_t)*128);
+    int16_t *samples_raw = (int16_t*)malloc(sizeof(int16_t)*128);
+    float *samples = (float*)malloc(sizeof(float)*128);
     i2s_driver_install(I2S_NUM_0, &i2s_cfg, 0, NULL);
     i2s_set_adc_mode(ADC_UNIT_1, ADC1_CHANNEL_0);
     i2s_adc_enable(I2S_NUM_0);
@@ -92,11 +88,11 @@ void audio_Task_routine(void *pvParameters){
         delay(1); // give time for the other tasks to allocate memory
 
         size_t bytes_read = 0;
-        i2s_read(I2S_NUM_0, samples, sizeof(int16_t)*88, &bytes_read, portMAX_DELAY);
+        i2s_read(I2S_NUM_0, samples_raw, sizeof(int16_t)*88, &bytes_read, portMAX_DELAY);
         int samples_read = bytes_read/sizeof(int16_t);
-        for(int i = 0; i < samples_read; i++) samples[i] = 16*(samples[i]-2048); // scale into 16-bit signed
+        for(int i = 0; i < samples_read; i++) samples[i] = (float)(samples_raw[i]-2048)*(1.0f/2048.0f);
         for(int i = 0; i < samples_read; i += 2){ // even and odd samples are switched for some reason
-            int16_t temp = samples[i];
+            float temp = samples[i];
             samples[i] = samples[i+1];
             samples[i+1] = temp;
         }
@@ -137,7 +133,7 @@ void screen_Task_routine(void *pvParameters){
 
 void comp_Task_routine(void *pvParameters){
     // Allocate some large arrays
-    int16_t *in = (int16_t*)malloc(SAMPLES*sizeof(int16_t));
+    float *in = (float*)malloc(SAMPLES*sizeof(float));
     kiss_fft_cpx *out = (kiss_fft_cpx*)malloc(SAMPLES*sizeof(kiss_fft_cpx));
     kiss_fftr_cfg cfg = kiss_fftr_alloc(SAMPLES, 0, NULL, NULL);
     kiss_fft_cpx *bands_cpx = (kiss_fft_cpx*)malloc(COLUMNS*sizeof(kiss_fft_cpx));
@@ -169,11 +165,11 @@ void comp_Task_routine(void *pvParameters){
         // Reads ENTIRE analogBuffer starting from analogBuffer.write_index, 
         //  this means a lot of overlap, but it decouples FFT calculations from 
         //  sampling
-        int32_t sum = 0;
+        float sum = 0;
         analogBuffer.read(in);
         for(int i = 0; i < SAMPLES; i++) sum += in[i];
         
-        int16_t avg = sum/SAMPLES;
+        float avg = sum*(1.0f/SAMPLES);
         for(int i = 0; i < SAMPLES; i++){
             in[i] -= avg;
             out[i] = (kiss_fft_cpx){0, 0}; // necessary before calling kiss_fftr
@@ -198,8 +194,8 @@ void comp_Task_routine(void *pvParameters){
 
         for(int i = 0; i < COLUMNS; i++){
             // Finds decibel value of complex magnitude (relative to 1<<14, apparent maximum)
-            int32_t mag_squared = bands_cpx[i].r*bands_cpx[i].r+bands_cpx[i].i*bands_cpx[i].i;
-            float x = 20*(log10(mag_squared)*0.5f-log10(1<<14)); // decibel level, reference is arbitrary
+            float mag_squared = bands_cpx[i].r*bands_cpx[i].r+bands_cpx[i].i*bands_cpx[i].i;
+            float x = 10.0f*log10(mag_squared); // decibel level, reference is arbitrary
 
             // Makes decibel values into positive values and blocking anything under THRESHOLD
             if(x < THRESHOLD) x = 0;

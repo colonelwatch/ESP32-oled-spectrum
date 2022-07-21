@@ -11,7 +11,7 @@
 // End-user constants, adjust depending on your electrical configuration
 const int dB_min = 5; // dB, minimum value to display
 const int dB_max = 45; // dB, maximum value to display
-const int clip_pin = 19; // Connect LED to this pin to get a clipping indicator (TODO: reimplement)
+const int clip_pin = 15; // Connect LED to this pin to get a clipping indicator (TODO: reimplement)
 const adc1_channel_t adc_channel = ADC1_CHANNEL_0; // Connect DC-biased line signal to this, see IDF docs for pin nums
 const float fft_mag_cutoff = 15.0; // factor used for cutting off noise in raw spectrum, raise if noise is in the output
 // #define SPI_SSD1306 // Uncomment if using a SPI SSD1306 OLED, also injects an interp routine for 3x the "frame rate"
@@ -151,6 +151,8 @@ void comp_Task_routine(void *pvParameters){
     i2s_set_adc_mode(ADC_UNIT_1, ADC1_CHANNEL_0);
     i2s_adc_enable(I2S_NUM_0);
 
+    unsigned long last_clipped = 0;
+
     delay(1000); // give time for the other tasks to allocate memory
 
     // Initalize benchmark
@@ -172,13 +174,29 @@ void comp_Task_routine(void *pvParameters){
 
         size_t bytes_read = 0;
         i2s_read(I2S_NUM_0, samples_raw, sizeof(int16_t)*308, &bytes_read, portMAX_DELAY); // blocking call down to ~142Hz
+
+        bool clipped = false;
         int samples_read = bytes_read/sizeof(int16_t);
-        for(int i = 0; i < samples_read; i++) samples[i] = (float)(samples_raw[i]-2048)*(1.0f/2048.0f);
+        for(int i = 0; i < samples_read; i++){
+            if(samples_raw[i] > 3873 || samples_raw[i] < 223) clipped = true;
+            samples[i] = (float)(samples_raw[i]-2048)*(1.0f/2048.0f);
+        }
+
+        if(clipped && !last_clipped){
+            digitalWrite(clip_pin, HIGH);
+            last_clipped = millis();
+        }
+        else if(!clipped && last_clipped && millis()-last_clipped > 100){
+            digitalWrite(clip_pin, LOW);
+            last_clipped = 0;
+        }
+
         for(int i = 0; i < samples_read; i += 2){ // even and odd samples are switched for some reason
             float temp = samples[i];
             samples[i] = samples[i+1];
             samples[i+1] = temp;
         }
+
         analogBuffer.write(samples, samples_read); // write only 308 samples to the buffer...
         
         float sum = 0, avg;

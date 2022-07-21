@@ -1,10 +1,8 @@
 // Copyright 2020 colonelwatch
 
 #include <driver/i2s.h>
-#include <Wire.h>
-// #include <SPI.h>
 #include <Adafruit_GFX.h>
-#include <Adafruit_SSD1306.h>
+#include <Adafruit_SSD1306.h> // includes references to both Wire.h and Spi.h
 
 #include "buffer.h"
 #include "kiss_fftr.h"
@@ -20,11 +18,12 @@
 // Post-processing settings
 #define CUTOFF 15.0f        // Helps determine where to cut low-value noise in
                             //  FFT output. Set as low as the noise will allow.
-#define TIME_FACTOR 2.25     // Output smoothing factor (exponential moving 
+#define TIME_FACTOR 1.75    // Output smoothing factor (exponential moving 
                             //  average alpha), 1.0 for no smoothing
 #define THRESHOLD 5         // dB, minimum display value
 #define CAP 45              // dB, maximum display value
 // Device settings
+// #define SPI_SSD1306         // Uncomment if using SPI_SSD1306 display
 #define COLUMNS 64          // Number of columns to display (fewer columns will
                             //  cause less banding)
 #define COLUMN_SIZE 1       // pixels, size of columns
@@ -64,37 +63,89 @@ const i2s_config_t i2s_cfg = {
     .fixed_mclk = 0,
 };
 
-/* Global variables */
+#ifdef SPI_SSD1306
+Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &SPI, 16, 17, 5, 10000000UL);
+#else
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1, 1000000UL);
-// Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &SPI, 16, 17, 5, 10000000UL);
+#endif
+
+/* Global variables */
 cq_kernels_t kernels; // Will point to kernels allocated in dynamic memory
 int frames; volatile int refresh; // Benchmarking variables
 
-volatile bool screenBuffer_swap_ready = false;
-doubleBuffer<uint8_t, COLUMNS> screenBuffer;
+volatile bool colBuffer_swap_ready = false;
+doubleBuffer<float, COLUMNS> colBuffer;
 fftBuffer<float, SAMPLES> analogBuffer;
 
 void screen_Task_routine(void *pvParameters){
-    screenBuffer.alloc();
+    colBuffer.alloc();
     display.begin(SSD1306_SWITCHCAPVCC, 0x3C);
     display.clearDisplay();
     display.display();
 
+    #ifdef SPI_SSD1306
+    bool impulse = false;
+    unsigned long currentMicros = micros();
+    float   *y = (float*)calloc(COLUMNS, sizeof(float)),
+            *y_1 = (float*)calloc(COLUMNS, sizeof(float)),
+            *y_2 = (float*)calloc(COLUMNS, sizeof(float)),
+            *x_1 = (float*)calloc(COLUMNS, sizeof(float)),
+            *x_2 = (float*)calloc(COLUMNS, sizeof(float));
+    #else
+    float   *y = (float*)calloc(COLUMNS, sizeof(float)),
+            *y_1 = (float*)calloc(COLUMNS, sizeof(float)),
+            *x_1 = (float*)calloc(COLUMNS, sizeof(float)),
+            *a_1 = (float*)calloc(COLUMNS, sizeof(float));
+    #endif
+
     delay(1000); // give time for the other tasks to allocate memory
 
     while(true){
-        delay(1); // give time for the IDLE task (including watchdog)
-
-        if(screenBuffer_swap_ready){
-            screenBuffer.swap();
-            screenBuffer_swap_ready = false;
+        #ifdef SPI_SSD1306
+        while(micros()-currentMicros < 1000000/(142*3)); // precise spin-waiting
+        currentMicros = micros();
+        if(colBuffer_swap_ready){
+            colBuffer.swap();
+            colBuffer_swap_ready = false;
+            impulse=true;
         }
+        #else
+        if(colBuffer_swap_ready){
+            colBuffer.swap();
+            colBuffer_swap_ready = false;
+        }
+        #endif
+
+        for(int i = 0; i < COLUMNS; i++){
+            #ifdef SPI_SSD1306
+            // 2nd-order Butterworth IIR with cutoff at 20Hz as an interpolator
+            float x = impulse? 3*colBuffer.readBuffer[i] : 0;
+            y[i] = 0.004917646918866*x+0.009835293837732*x_1[i]+0.004917646918866*x_2[i] \
+                +1.792062605350460*y_1[i]-0.811733193025923*y_2[i]; // todo: calculate coefficients from TIME_FACTOR?
+            
+            x_2[i] = x_1[i];
+            x_1[i] = x;
+            y_2[i] = y_1[i];
+            y_1[i] = y[i];
+            #else
+            float x = colBuffer.readBuffer[i];
+            float a = a_1[i]*anti_coeff+x*(coeff*0.5f)+x_1[i]*(coeff*0.5f);
+            y[i] = y_1[i]*anti_coeff+a*(coeff*0.5f)+a_1[i]*(coeff*0.5f);
+            y_1[i] = y[i];
+            x_1[i] = x;
+            a_1[i] = a;
+            #endif
+        }
+
+        #ifdef SPI_SSD1306
+        impulse = false;
+        #endif
 
         display.clearDisplay();
         display.drawFastHLine(0, 63, 128, WHITE);
         const int col_px = 128/COLUMNS;
         for(int i = 0; i < COLUMNS; i++){
-            int length = screenBuffer.readBuffer[i];
+            int length = y[i]*(64.0f/(CAP-THRESHOLD));
             display.fillRect(i*col_px-COLUMN_SIZE, 64-length, COLUMN_SIZE, length, WHITE);
         }
         display.display();
@@ -117,10 +168,6 @@ void comp_Task_routine(void *pvParameters){
     i2s_driver_install(I2S_NUM_0, &i2s_cfg, 0, NULL);
     i2s_set_adc_mode(ADC_UNIT_1, ADC1_CHANNEL_0);
     i2s_adc_enable(I2S_NUM_0);
-
-    float *y_1 = (float*)calloc(COLUMNS, sizeof(float)),
-          *x_1 = (float*)calloc(COLUMNS, sizeof(float)),
-          *a_1 = (float*)calloc(COLUMNS, sizeof(float));
 
     delay(1000); // give time for the other tasks to allocate memory
 
@@ -190,17 +237,11 @@ void comp_Task_routine(void *pvParameters){
             // Makes decibel values into positive values and blocking anything under THRESHOLD
             if(x < THRESHOLD) x = 0;
             else x -= THRESHOLD;
-            
-            float a = a_1[i]*anti_coeff+x*(coeff*0.5f)+x_1[i]*(coeff*0.5f);
-            float y = y_1[i]*anti_coeff+a*(coeff*0.5f)+a_1[i]*(coeff*0.5f);
-            y_1[i] = y;
-            x_1[i] = x;
-            a_1[i] = a;
         
             // Translates output data into column heights, which is entered into the buffer
-            screenBuffer.writeBuffer[i] = 64*y*(1.0f/(CAP-THRESHOLD));
+            colBuffer.writeBuffer[i] = x;
         }
-        screenBuffer_swap_ready = true;   // Raises flag to indicate buffer is ready to push
+        colBuffer_swap_ready = true;   // Raises flag to indicate buffer is ready to push
 
         if(!timestamps[4]) timestamps[4] = micros();
 
@@ -232,6 +273,8 @@ void setup() {
     // Generate kernels (memory-intensive!) before starting any other tasks
     kernels = generate_kernels(cq_cfg);
     kernels = reallocate_kernels(kernels, cq_cfg);
+
+    disableCore0WDT(); // disable the watchdog in order to let screen_Task_routine spin-wait
     
     // Launches comp_Task_routine on core 0 with no parameters (accesses global variables)
     xTaskCreatePinnedToCore(screen_Task_routine, "screen", 2500, NULL, configMAX_PRIORITIES-1, new TaskHandle_t, 0);

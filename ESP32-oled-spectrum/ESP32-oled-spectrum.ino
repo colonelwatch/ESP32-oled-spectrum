@@ -197,8 +197,8 @@ void comp_Task_routine(void *pvParameters){
         if(!timestamps[2]) timestamps[2] = micros();
         
         // Cutting off noise with a threshold inversely proportional to N_samples
-        const int16_t minimum_mag = 2048*fft_mag_cutoff/N_samples;
-        const int32_t minimum_mag_squared = minimum_mag*minimum_mag;
+        const float minimum_mag = 2048*fft_mag_cutoff/N_samples;
+        const float minimum_mag_squared = minimum_mag*minimum_mag;
         for(int i = 0; i < N_samples; i++)
             if(out[i].r*out[i].r+out[i].i*out[i].i < minimum_mag_squared)
                 out[i] = (kiss_fft_cpx){0, 0};

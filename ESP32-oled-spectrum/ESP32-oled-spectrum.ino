@@ -51,20 +51,15 @@ void screen_Task_routine(void *pvParameters){
     display.begin(SSD1306_SWITCHCAPVCC, 0x3C);
     display.clearDisplay();
     display.display();
-
-    #ifdef SPI_SSD1306
-    bool impulse = false;
+    
     unsigned long currentMicros = micros();
     float   *y = (float*)calloc(N_columns, sizeof(float)),
             *y_1 = (float*)calloc(N_columns, sizeof(float)),
             *y_2 = (float*)calloc(N_columns, sizeof(float)),
             *x_1 = (float*)calloc(N_columns, sizeof(float)),
             *x_2 = (float*)calloc(N_columns, sizeof(float));
-    #else
-    float   *y = (float*)calloc(N_columns, sizeof(float)),
-            *y_1 = (float*)calloc(N_columns, sizeof(float)),
-            *x_1 = (float*)calloc(N_columns, sizeof(float)),
-            *a_1 = (float*)calloc(N_columns, sizeof(float));
+    #ifdef SPI_SSD1306
+    bool impulse = false;
     #endif
 
     delay(1000); // give time for the other tasks to allocate memory
@@ -76,9 +71,11 @@ void screen_Task_routine(void *pvParameters){
         if(colBuffer_swap_ready){
             colBuffer.swap();
             colBuffer_swap_ready = false;
-            impulse=true;
+            impulse = true;
         }
         #else
+        while(micros()-currentMicros < 1000000/89); // precise, slower spin-waiting
+        currentMicros = micros();
         if(colBuffer_swap_ready){
             colBuffer.swap();
             colBuffer_swap_ready = false;
@@ -86,24 +83,27 @@ void screen_Task_routine(void *pvParameters){
         #endif
 
         for(int i = 0; i < N_columns; i++){
+            float x = colBuffer.readBuffer[i]-dB_min;
+            if(x < 0) x = 0;
             #ifdef SPI_SSD1306
-            // 2nd-order Butterworth IIR with cutoff at 20Hz as an interpolator
-            float x = impulse? 3*colBuffer.readBuffer[i] : 0;
+            // upsampling by inserting zeros then filtering, rather than holding x for extended time 
+            //  (called zero-order hold) then filtering
+            if(impulse) x *= 3;
+            else x = 0;
+            // 2nd-order Butterworth IIR with cutoff at 20Hz (426Hz "sampling") as an interpolator
             y[i] = 0.004917646918866*x+0.009835293837732*x_1[i]+0.004917646918866*x_2[i] \
                 +1.792062605350460*y_1[i]-0.811733193025923*y_2[i];
-            
+            #else
+            // 2nd-order Butterworth IIR with cutoff at 10Hz (89Hz "sampling") as a filter
+            //  Lower cutoff because filter failed to kill 60Hz cycles otherwise (appears as ghosting)
+            y[i] = 0.081926471866054*x+0.163852943732109*x_1[i]+0.081926471866054*x_2[i] \
+                +1.043326781704508*y_1[i]-0.371032669168726*y_2[i];
+            #endif
+
             x_2[i] = x_1[i];
             x_1[i] = x;
             y_2[i] = y_1[i];
             y_1[i] = y[i];
-            #else
-            float x = colBuffer.readBuffer[i];
-            float a = a_1[i]*0.42857142857+x*0.28571428571+x_1[i]*0.28571428571;
-            y[i] = y_1[i]*0.42857142857+a*0.28571428571+a_1[i]*0.28571428571;
-            y_1[i] = y[i];
-            x_1[i] = x;
-            a_1[i] = a;
-            #endif
         }
 
         #ifdef SPI_SSD1306
@@ -213,11 +213,6 @@ void comp_Task_routine(void *pvParameters){
             // Finds decibel value of complex magnitude (relative to 1<<14, apparent maximum)
             float mag_squared = bands_cpx[i].r*bands_cpx[i].r+bands_cpx[i].i*bands_cpx[i].i;
             float x = 10.0f*log10(mag_squared); // dB, (squared in ==> 10*log10, not 20*log10), reference level is arbitrary
-
-            // Makes decibel values into positive values and blocking anything under dB_min
-            if(x < dB_min) x = 0;
-            else x -= dB_min;
-        
             colBuffer.writeBuffer[i] = x;
         }
         colBuffer_swap_ready = true;   // Raises flag to indicate buffer is ready to push

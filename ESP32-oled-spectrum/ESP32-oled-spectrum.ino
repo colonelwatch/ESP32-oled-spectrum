@@ -59,22 +59,26 @@ void screen_Task_routine(void *pvParameters){
             *x_1 = (float*)calloc(N_columns, sizeof(float)),
             *x_2 = (float*)calloc(N_columns, sizeof(float));
     #ifdef SPI_SSD1306
-    bool impulse = false;
+    int cycle_state = 0;
     #endif
 
     delay(1000); // give time for the other tasks to allocate memory
 
     while(true){
         #ifdef SPI_SSD1306
-        while(micros()-currentMicros < 1000000/(142*3)); // precise spin-waiting
-        currentMicros = micros();
-        if(colBuffer_swap_ready){
+        if(cycle_state == 2){
+            while(!colBuffer_swap_ready); // spin-wait until the buffer is ready
             colBuffer.swap();
             colBuffer_swap_ready = false;
-            impulse = true;
+            cycle_state = 0;
         }
+        else{
+            cycle_state++;
+            while(micros()-currentMicros < 1000000/(142*3)); // less precise spin-waiting
+        }
+        currentMicros = micros();
         #else
-        while(micros()-currentMicros < 1000000/89); // precise, slower spin-waiting
+        while(micros()-currentMicros < 1000000/89); // slower spin-waiting
         currentMicros = micros();
         if(colBuffer_swap_ready){
             colBuffer.swap();
@@ -88,14 +92,13 @@ void screen_Task_routine(void *pvParameters){
             #ifdef SPI_SSD1306
             // upsampling by inserting zeros then filtering, rather than holding x for extended time 
             //  (called zero-order hold) then filtering
-            if(impulse) x *= 3;
+            if(cycle_state == 0) x *= 3;
             else x = 0;
-            // 2nd-order Butterworth IIR with cutoff at 20Hz (426Hz "sampling") as an interpolator
+            // 2nd-order Butterworth IIR with cutoff at 10Hz (426Hz "sampling") as an interpolator
             y[i] = 0.004917646918866*x+0.009835293837732*x_1[i]+0.004917646918866*x_2[i] \
                 +1.792062605350460*y_1[i]-0.811733193025923*y_2[i];
             #else
             // 2nd-order Butterworth IIR with cutoff at 10Hz (89Hz "sampling") as a filter
-            //  Lower cutoff because filter failed to kill 60Hz cycles otherwise (appears as ghosting)
             y[i] = 0.081926471866054*x+0.163852943732109*x_1[i]+0.081926471866054*x_2[i] \
                 +1.043326781704508*y_1[i]-0.371032669168726*y_2[i];
             #endif
@@ -105,10 +108,6 @@ void screen_Task_routine(void *pvParameters){
             y_2[i] = y_1[i];
             y_1[i] = y[i];
         }
-
-        #ifdef SPI_SSD1306
-        impulse = false;
-        #endif
 
         display.clearDisplay();
         display.drawFastHLine(0, 63, 128, WHITE);

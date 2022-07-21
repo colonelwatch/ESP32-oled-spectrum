@@ -8,74 +8,43 @@
 #include "kiss_fftr.h"
 #include "cq_kernel.h"
 
-/* User-configurable global constants */
-// FFT settings
-#define SAMPLES 6144        // Prime factorization should contain as many 2s as 
-                            //  possible. Raise for less banding and lower for 
-                            //  faster performance.
-#define MAX_FREQUENCY 14000 // Hz, must be 1/2 of sampling frequency or less
-#define MIN_FREQUENCY 40    // Hz, cannot be 0, decreasing causes banding
-// Post-processing settings
-#define CUTOFF 15.0f        // Helps determine where to cut low-value noise in
-                            //  FFT output. Set as low as the noise will allow.
-#define TIME_FACTOR 1.75    // Output smoothing factor (exponential moving 
-                            //  average alpha), 1.0 for no smoothing
-#define THRESHOLD 5         // dB, minimum display value
-#define CAP 45              // dB, maximum display value
-// Device settings
-// #define SPI_SSD1306         // Uncomment if using SPI_SSD1306 display
-#define COLUMNS 64          // Number of columns to display (fewer columns will
-                            //  cause less banding)
-#define COLUMN_SIZE 1       // pixels, size of columns
-#define CLIP_PIN 19         // Connect LED to this pin to get a clipping indicator
-#define INPUT_PIN 36        // Connect DC-biased line-level audio signal to this
+// End-user constants, adjust depending on your electrical configuration
+const int dB_min = 5; // dB, minimum value to display
+const int dB_max = 45; // dB, maximum value to display
+const int clip_pin = 19; // Connect LED to this pin to get a clipping indicator (TODO: reimplement)
+const adc1_channel_t adc_channel = ADC1_CHANNEL_0; // Connect DC-biased line signal to this, see IDF docs for pin nums
+const float fft_mag_cutoff = 15.0; // factor used for cutting off noise in raw spectrum, raise if noise is in the output
+// #define SPI_SSD1306 // Uncomment if using a SPI SSD1306 OLED, also injects an interp routine for 3x the "frame rate"
 
-/* Other global constants, changing not recommended */ 
-#define SCREEN_WIDTH 128              // pixels, OLED display width
-#define SCREEN_HEIGHT 64              // pixels, OLED display height
-#define SAMPLING_FREQUENCY 44100      // Hz
-#define MINVAL 0.225f                 // used in cq_kernel
+// Critical constants, not intended for end-user modification
+const int N_samples = 6144; // FFT length, prime factorication should contain as many 2s as possible, affects performance
+const int sampling_frequency = 44100; // Hz, I2S sampling frequency
+const int max_freq = 14000; // Hz, last CQT center freq to display, ensure CQT kernels aren't degenerated when changing
+const int min_freq = 40; // Hz, first CQT center freq to display, ensure CQT kernels aren't degenerated when changing
+const float min_val = 0.225; // see Brown CQT paper for explanation
+const int N_columns = 64; // number of columns to display
+const int col_width = 1; // px, width of each column
+const int screen_width = 128; // px, width of screen
+const int screen_height = 64; // px, height of screen
 
-/* Other global constants, calculated from #define'd values */
-const float coeff = 1./TIME_FACTOR;
-const float anti_coeff = (TIME_FACTOR-1.)/TIME_FACTOR;
-const int16_t minimum_mag = 2048*CUTOFF/SAMPLES; // in FFT value
-const int32_t minimum_mag_squared = minimum_mag*minimum_mag;
-struct cq_kernel_cfg cq_cfg = { // config for cq_kernel
-    .samples = SAMPLES,
-    .bands = COLUMNS,
-    .fmin = MIN_FREQUENCY,
-    .fmax = MAX_FREQUENCY,
-    .fs = SAMPLING_FREQUENCY,
-    .min_val = MINVAL
+// global variables, accessed during execution
+struct cq_kernel_cfg cq_cfg = { // accessed before all other tasks are started, so its global
+    .samples = N_samples,
+    .bands = N_columns,
+    .fmin = min_freq,
+    .fmax = max_freq,
+    .fs = sampling_frequency,
+    .min_val = min_val
 };
-const i2s_config_t i2s_cfg = {
-    .mode = (i2s_mode_t)( I2S_MODE_MASTER | I2S_MODE_RX | I2S_MODE_ADC_BUILT_IN ),
-    .sample_rate = SAMPLING_FREQUENCY,
-    .bits_per_sample = I2S_BITS_PER_SAMPLE_16BIT,
-    .channel_format = I2S_CHANNEL_FMT_ONLY_LEFT,
-    .communication_format = I2S_COMM_FORMAT_STAND_I2S,
-    .intr_alloc_flags = ESP_INTR_FLAG_LEVEL1,
-    .dma_buf_count = 2,
-    .dma_buf_len = 512,
-    .use_apll = false,
-    .tx_desc_auto_clear = false,
-    .fixed_mclk = 0,
-};
-
+cq_kernels_t kernels; // will point to kernels allocated in dynamic memory
+int frames; volatile int refresh; // benchmarking variables
+fftBuffer<float, N_samples> analogBuffer; // for samples
+volatile bool colBuffer_swap_ready = false; doubleBuffer<float, N_columns> colBuffer; // for CQT out before post-processing
 #ifdef SPI_SSD1306
-Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &SPI, 16, 17, 5, 10000000UL);
+Adafruit_SSD1306 display(screen_width, screen_height, &SPI, 16, 17, 5, 10000000UL);
 #else
-Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1, 1000000UL);
+Adafruit_SSD1306 display(screen_width, screen_height, &Wire, -1, 1000000UL);
 #endif
-
-/* Global variables */
-cq_kernels_t kernels; // Will point to kernels allocated in dynamic memory
-int frames; volatile int refresh; // Benchmarking variables
-
-volatile bool colBuffer_swap_ready = false;
-doubleBuffer<float, COLUMNS> colBuffer;
-fftBuffer<float, SAMPLES> analogBuffer;
 
 void screen_Task_routine(void *pvParameters){
     colBuffer.alloc();
@@ -86,16 +55,16 @@ void screen_Task_routine(void *pvParameters){
     #ifdef SPI_SSD1306
     bool impulse = false;
     unsigned long currentMicros = micros();
-    float   *y = (float*)calloc(COLUMNS, sizeof(float)),
-            *y_1 = (float*)calloc(COLUMNS, sizeof(float)),
-            *y_2 = (float*)calloc(COLUMNS, sizeof(float)),
-            *x_1 = (float*)calloc(COLUMNS, sizeof(float)),
-            *x_2 = (float*)calloc(COLUMNS, sizeof(float));
+    float   *y = (float*)calloc(N_columns, sizeof(float)),
+            *y_1 = (float*)calloc(N_columns, sizeof(float)),
+            *y_2 = (float*)calloc(N_columns, sizeof(float)),
+            *x_1 = (float*)calloc(N_columns, sizeof(float)),
+            *x_2 = (float*)calloc(N_columns, sizeof(float));
     #else
-    float   *y = (float*)calloc(COLUMNS, sizeof(float)),
-            *y_1 = (float*)calloc(COLUMNS, sizeof(float)),
-            *x_1 = (float*)calloc(COLUMNS, sizeof(float)),
-            *a_1 = (float*)calloc(COLUMNS, sizeof(float));
+    float   *y = (float*)calloc(N_columns, sizeof(float)),
+            *y_1 = (float*)calloc(N_columns, sizeof(float)),
+            *x_1 = (float*)calloc(N_columns, sizeof(float)),
+            *a_1 = (float*)calloc(N_columns, sizeof(float));
     #endif
 
     delay(1000); // give time for the other tasks to allocate memory
@@ -116,12 +85,12 @@ void screen_Task_routine(void *pvParameters){
         }
         #endif
 
-        for(int i = 0; i < COLUMNS; i++){
+        for(int i = 0; i < N_columns; i++){
             #ifdef SPI_SSD1306
             // 2nd-order Butterworth IIR with cutoff at 20Hz as an interpolator
             float x = impulse? 3*colBuffer.readBuffer[i] : 0;
             y[i] = 0.004917646918866*x+0.009835293837732*x_1[i]+0.004917646918866*x_2[i] \
-                +1.792062605350460*y_1[i]-0.811733193025923*y_2[i]; // todo: calculate coefficients from TIME_FACTOR?
+                +1.792062605350460*y_1[i]-0.811733193025923*y_2[i];
             
             x_2[i] = x_1[i];
             x_1[i] = x;
@@ -129,8 +98,8 @@ void screen_Task_routine(void *pvParameters){
             y_1[i] = y[i];
             #else
             float x = colBuffer.readBuffer[i];
-            float a = a_1[i]*anti_coeff+x*(coeff*0.5f)+x_1[i]*(coeff*0.5f);
-            y[i] = y_1[i]*anti_coeff+a*(coeff*0.5f)+a_1[i]*(coeff*0.5f);
+            float a = a_1[i]*0.42857142857+x*0.28571428571+x_1[i]*0.28571428571;
+            y[i] = y_1[i]*0.42857142857+a*0.28571428571+a_1[i]*0.28571428571;
             y_1[i] = y[i];
             x_1[i] = x;
             a_1[i] = a;
@@ -143,10 +112,10 @@ void screen_Task_routine(void *pvParameters){
 
         display.clearDisplay();
         display.drawFastHLine(0, 63, 128, WHITE);
-        const int col_px = 128/COLUMNS;
-        for(int i = 0; i < COLUMNS; i++){
-            int length = y[i]*(64.0f/(CAP-THRESHOLD));
-            display.fillRect(i*col_px-COLUMN_SIZE, 64-length, COLUMN_SIZE, length, WHITE);
+        const int col_px = 128/N_columns;
+        for(int i = 0; i < N_columns; i++){
+            int length = y[i]*(64.0f/(dB_max-dB_min));
+            display.fillRect(i*col_px-col_width, 64-length, col_width, length, WHITE);
         }
         display.display();
         
@@ -156,12 +125,25 @@ void screen_Task_routine(void *pvParameters){
 
 void comp_Task_routine(void *pvParameters){
     // Allocate some large arrays
-    float *in = (float*)malloc(SAMPLES*sizeof(float));
-    kiss_fft_cpx *out = (kiss_fft_cpx*)malloc(SAMPLES*sizeof(kiss_fft_cpx));
-    kiss_fftr_cfg cfg = kiss_fftr_alloc(SAMPLES, 0, NULL, NULL);
-    kiss_fft_cpx *bands_cpx = (kiss_fft_cpx*)malloc(COLUMNS*sizeof(kiss_fft_cpx));
+    float *in = (float*)malloc(N_samples*sizeof(float));
+    kiss_fft_cpx *out = (kiss_fft_cpx*)malloc(N_samples*sizeof(kiss_fft_cpx));
+    kiss_fftr_cfg cfg = kiss_fftr_alloc(N_samples, 0, NULL, NULL);
+    kiss_fft_cpx *bands_cpx = (kiss_fft_cpx*)malloc(N_columns*sizeof(kiss_fft_cpx));
 
     // Initialize I2S sampling
+    const i2s_config_t i2s_cfg = {
+        .mode = (i2s_mode_t)( I2S_MODE_MASTER | I2S_MODE_RX | I2S_MODE_ADC_BUILT_IN ),
+        .sample_rate = sampling_frequency,
+        .bits_per_sample = I2S_BITS_PER_SAMPLE_16BIT,
+        .channel_format = I2S_CHANNEL_FMT_ONLY_LEFT,
+        .communication_format = I2S_COMM_FORMAT_STAND_I2S,
+        .intr_alloc_flags = ESP_INTR_FLAG_LEVEL1,
+        .dma_buf_count = 2,
+        .dma_buf_len = 512,
+        .use_apll = false,
+        .tx_desc_auto_clear = false,
+        .fixed_mclk = 0,
+    };
     analogBuffer.alloc();
     int16_t *samples_raw = (int16_t*)malloc(sizeof(int16_t)*512);
     float *samples = (float*)malloc(sizeof(float)*512);
@@ -197,17 +179,13 @@ void comp_Task_routine(void *pvParameters){
             samples[i] = samples[i+1];
             samples[i+1] = temp;
         }
-        analogBuffer.write(samples, samples_read);
+        analogBuffer.write(samples, samples_read); // write only 308 samples to the buffer...
         
-        // Reads ENTIRE analogBuffer starting from analogBuffer.write_index, 
-        //  this means a lot of overlap, but it decouples FFT calculations from 
-        //  sampling
-        float sum = 0;
-        analogBuffer.read(in);
-        for(int i = 0; i < SAMPLES; i++) sum += in[i];
-        
-        float avg = sum*(1.0f/SAMPLES);
-        for(int i = 0; i < SAMPLES; i++){
+        float sum = 0, avg;
+        analogBuffer.read(in); // ...and read the past N_samples out!
+        for(int i = 0; i < N_samples; i++) sum += in[i];
+        avg = sum*(1.0f/N_samples);
+        for(int i = 0; i < N_samples; i++){
             in[i] -= avg;
             out[i] = (kiss_fft_cpx){0, 0}; // necessary before calling kiss_fftr
         }
@@ -218,27 +196,28 @@ void comp_Task_routine(void *pvParameters){
 
         if(!timestamps[2]) timestamps[2] = micros();
         
-        // Cutting off noise with a threshold inversely proportional to SAMPLES
-        for(int i = 0; i < SAMPLES; i++)
+        // Cutting off noise with a threshold inversely proportional to N_samples
+        const int16_t minimum_mag = 2048*fft_mag_cutoff/N_samples;
+        const int32_t minimum_mag_squared = minimum_mag*minimum_mag;
+        for(int i = 0; i < N_samples; i++)
             if(out[i].r*out[i].r+out[i].i*out[i].i < minimum_mag_squared)
                 out[i] = (kiss_fft_cpx){0, 0};
 
         // Convert FFT output to Constant Q output using cq_kernel
-        for(int i = 0; i < COLUMNS; i++) bands_cpx[i] = (kiss_fft_cpx){0, 0};
+        for(int i = 0; i < N_columns; i++) bands_cpx[i] = (kiss_fft_cpx){0, 0};
         apply_kernels(out, bands_cpx, kernels, cq_cfg);
 
         if(!timestamps[3]) timestamps[3] = micros();
 
-        for(int i = 0; i < COLUMNS; i++){
+        for(int i = 0; i < N_columns; i++){
             // Finds decibel value of complex magnitude (relative to 1<<14, apparent maximum)
             float mag_squared = bands_cpx[i].r*bands_cpx[i].r+bands_cpx[i].i*bands_cpx[i].i;
-            float x = 10.0f*log10(mag_squared); // decibel level, reference is arbitrary
+            float x = 10.0f*log10(mag_squared); // dB, (squared in ==> 10*log10, not 20*log10), reference level is arbitrary
 
-            // Makes decibel values into positive values and blocking anything under THRESHOLD
-            if(x < THRESHOLD) x = 0;
-            else x -= THRESHOLD;
+            // Makes decibel values into positive values and blocking anything under dB_min
+            if(x < dB_min) x = 0;
+            else x -= dB_min;
         
-            // Translates output data into column heights, which is entered into the buffer
             colBuffer.writeBuffer[i] = x;
         }
         colBuffer_swap_ready = true;   // Raises flag to indicate buffer is ready to push
@@ -267,8 +246,7 @@ void comp_Task_routine(void *pvParameters){
 void setup() {
     Serial.begin(115200);
     
-    pinMode(CLIP_PIN, OUTPUT);
-    pinMode(INPUT_PIN, INPUT);
+    pinMode(clip_pin, OUTPUT);
     
     // Generate kernels (memory-intensive!) before starting any other tasks
     kernels = generate_kernels(cq_cfg);
@@ -276,7 +254,6 @@ void setup() {
 
     disableCore0WDT(); // disable the watchdog in order to let screen_Task_routine spin-wait
     
-    // Launches comp_Task_routine on core 0 with no parameters (accesses global variables)
     xTaskCreatePinnedToCore(screen_Task_routine, "screen", 2500, NULL, configMAX_PRIORITIES-1, new TaskHandle_t, 0);
     xTaskCreatePinnedToCore(comp_Task_routine, "comp", 2500, NULL, configMAX_PRIORITIES-1, new TaskHandle_t, 1);
 }

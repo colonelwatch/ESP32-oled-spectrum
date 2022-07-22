@@ -3,21 +3,17 @@
 [![Picture](/images/closeup.jpeg)](https://youtu.be/_1pETVk4ngk)
 *Click through image to view demonstration on Youtube*
 
-This is a quick adaptation of an old project, [ESP32-dotmatrix-spectrum](https://github.com/colonelwatch/ESP32-dotmatrix-spectrum), into the more accessible OLED. 
-I borrowed from another project [attiny85-spectrum](https://github.com/colonelwatch/attiny85-spectrum), but the result was so appealing that I decided to share it!
-
 ⚠️ **Disclaimer!** ⚠️ This project depends on fixes introduced in the latest (as of writing) ESP32 v2.0.4 core. Upgrade the core through the Arduino boards manager.
 
-There are also a number of improvements and notes here that will be carried over to the original project eventually.
+ESP32-oled-spectrum is a high-performance, high-resolution audio spectrum visualizer, leveraging what the ESP32 microcontroller and the SSD1306 OLED module uniquely offer. Namely, it's 64 bars of logarithmically-spaced frequencies moving at *426* frames per second, produced from the following:
 
-That includes:
-* My own latest [cq_kernels](https://github.com/colonelwatch/cq_kernel) library, which integrates kiss_fft into a fast constant Q transform. This gives true logarithmic frequency scaling.
-  * Amplitudes are now in decibels, which is unambiguous though there is no obvious reference
-* Switching to the kiss_fft library, which is faster and has a permissive license
-* Other optimizations
+* the I2S and I2C/SPI peripherals, not to mention both cores of the ESP32
+* a Constant Q transform ([cq_kernel](https://github.com/colonelwatch/cq_kernel)) computed from a 6144-point FFT ([kissfft](https://github.com/mborgerding/kissfft)), 142 times a second
+  * the CQT essentially emulates sampling a bank of filters
+* post-processing, including a 3x interpolation routine
 
-If you are adjusting the settings, banding in the output means the FFT size is too small, however keep in mind that performance (refresh rate) and resolution (FFT size) are in a balance.
-
-Here is a schematic for a decent amplification circuit into this project. It presents an impedance of at least 5k, which should be okay for line-level and definitely good with a phone. You may also add an LED to pin 19 to get a clipping indicator.
+So, please give this Arduino sketch an upload yourself. Its a project I started in 2019 then continued to improve over the years, and now, cameras literally cannot capture how nice this looks! The promised performance is on a SPI SSD1306 OLED module. I also have a routine for the ubiquitous I2C one, still at a respectable 89 frames per second. Below is an okay amplification circuit into pin 36/VP to get started with.
 
 ![Amplification circuit](/images/amplification.png)
+
+It presents an impedance of at least 5k, which should be okay for line-level and definitely good with a phone. Alternatively, you can feed a line-level signal biased at half of 3.3 volts. You may also add an LED to pin 15 to get a clipping indicator.

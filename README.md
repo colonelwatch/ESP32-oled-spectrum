@@ -1,7 +1,6 @@
 # ESP32-oled-spectrum
 
-[![Picture](/images/closeup.jpeg)](https://youtu.be/_1pETVk4ngk)
-*Click through image to view demonstration on Youtube*
+![Picture](/images/closeup.jpeg)
 
 ⚠️ **Disclaimer!** ⚠️ This project depends on fixes introduced in the latest (as of writing) ESP32 v2.0.4 core. Upgrade the core through the Arduino boards manager.
 

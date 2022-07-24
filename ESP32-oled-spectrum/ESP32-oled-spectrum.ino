@@ -34,6 +34,7 @@ const int sampling_frequency = 44100; // Hz, I2S sampling frequency
 const int max_freq = 14000; // Hz, last CQT center freq to display, ensure CQT kernels aren't degenerated when changing
 const int min_freq = 40; // Hz, first CQT center freq to display, ensure CQT kernels aren't degenerated when changing
 const float min_val = 0.225; // see Brown CQT paper for explanation
+const int calc_rate = 142; // Hz, calcs pinned to this rate, artifacts on tone tests and fails to meet calc_rate if too high
 const int N_columns = 64; // number of columns to display
 const int col_width = 1; // px, width of each column
 const int screen_width = 128; // px, width of screen
@@ -78,7 +79,9 @@ void screen_Task_routine(void *pvParameters){
 
     while(true){
         #ifdef SPI_SSD1306
-        if(cycle_state == 2){
+        const int interpolation_factor = 3; // 3x the "frame rate"
+        const int update_rate = calc_rate*interpolation_factor;
+        if(cycle_state == interpolation_factor-1){
             while(!colBuffer_swap_ready); // spin-wait until the buffer is ready
             colBuffer.swap();
             colBuffer_swap_ready = false;
@@ -86,11 +89,12 @@ void screen_Task_routine(void *pvParameters){
         }
         else{
             cycle_state++;
-            while(micros()-currentMicros < 1000000/(142*3)); // less precise spin-waiting
+            while(micros()-currentMicros < 1000000/update_rate);
         }
         currentMicros = micros();
         #else
-        while(micros()-currentMicros < 1000000/89); // slower spin-waiting
+        const int update_rate = 89;
+        while(micros()-currentMicros < 1000000/update_rate);
         currentMicros = micros();
         if(colBuffer_swap_ready){
             colBuffer.swap();
@@ -104,7 +108,7 @@ void screen_Task_routine(void *pvParameters){
             #ifdef SPI_SSD1306
             // upsampling by inserting zeros then filtering, rather than holding x for extended time 
             //  (called zero-order hold) then filtering
-            if(cycle_state == 0) x *= 3;
+            if(cycle_state == 0) x *= interpolation_factor;
             else x = 0;
             // 2nd-order Butterworth IIR with cutoff at 10Hz (426Hz "sampling") as an interpolator
             y[i] = 0.004917646918866*x+0.009835293837732*x_1[i]+0.004917646918866*x_2[i] \
@@ -142,6 +146,8 @@ void comp_Task_routine(void *pvParameters){
     kiss_fft_cpx *bands_cpx = (kiss_fft_cpx*)malloc(N_columns*sizeof(kiss_fft_cpx));
 
     // Initialize I2S sampling
+    const int samples_to_read = sampling_frequency/calc_rate+1; // better to want a sample more than to want too fast
+    const int i2s_buffer_size = (1 << (int(log2(samples_to_read))+1));
     const i2s_config_t i2s_cfg = {
         .mode = (i2s_mode_t)( I2S_MODE_MASTER | I2S_MODE_RX | I2S_MODE_ADC_BUILT_IN ),
         .sample_rate = sampling_frequency,
@@ -150,14 +156,14 @@ void comp_Task_routine(void *pvParameters){
         .communication_format = I2S_COMM_FORMAT_STAND_I2S,
         .intr_alloc_flags = ESP_INTR_FLAG_LEVEL1,
         .dma_buf_count = 2,
-        .dma_buf_len = 512,
+        .dma_buf_len = i2s_buffer_size,
         .use_apll = false,
         .tx_desc_auto_clear = false,
         .fixed_mclk = 0,
     };
     analogBuffer.alloc();
-    int16_t *samples_raw = (int16_t*)malloc(sizeof(int16_t)*512);
-    float *samples = (float*)malloc(sizeof(float)*512);
+    int16_t *samples_raw = (int16_t*)malloc(sizeof(int16_t)*i2s_buffer_size);
+    float *samples = (float*)malloc(sizeof(float)*i2s_buffer_size);
     i2s_driver_install(I2S_NUM_0, &i2s_cfg, 0, NULL);
     i2s_set_adc_mode(ADC_UNIT_1, ADC1_CHANNEL_0);
     i2s_adc_enable(I2S_NUM_0);
@@ -184,7 +190,7 @@ void comp_Task_routine(void *pvParameters){
         if(!timestamps[0]) timestamps[0] = micros(); // run-once timestamping
 
         size_t bytes_read = 0;
-        i2s_read(I2S_NUM_0, samples_raw, sizeof(int16_t)*308, &bytes_read, portMAX_DELAY); // blocking call down to ~142Hz
+        i2s_read(I2S_NUM_0, samples_raw, sizeof(int16_t)*samples_to_read, &bytes_read, portMAX_DELAY); // blocking call
 
         bool clipped = false;
         int samples_read = bytes_read/sizeof(int16_t);

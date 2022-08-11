@@ -21,7 +21,7 @@
 #include "cq_kernel.h"
 
 // End-user constants, adjust depending on your electrical configuration
-const int dB_min = 5; // dB, minimum value to display
+const int dB_min = 25; // dB, minimum value to display
 const int dB_max = 45; // dB, maximum value to display
 const int clip_pin = 15; // Connect LED to this pin to get a clipping indicator (TODO: reimplement)
 const adc1_channel_t adc_channel = ADC1_CHANNEL_0; // Connect DC-biased line signal to this, see IDF docs for pin nums
@@ -33,10 +33,10 @@ const int N_samples = 6144; // FFT length, prime factorication should contain as
 const int sampling_frequency = 44100; // Hz, I2S sampling frequency
 const int max_freq = 14000; // Hz, last CQT center freq to display, ensure CQT kernels aren't degenerated when changing
 const int min_freq = 40; // Hz, first CQT center freq to display, ensure CQT kernels aren't degenerated when changing
-const float min_val = 0.225; // see Brown CQT paper for explanation
-const int calc_rate = 142; // Hz, calcs pinned to this rate, artifacts on tone tests and fails to meet calc_rate if too high
-const int N_columns = 64; // number of columns to display
-const int col_width = 1; // px, width of each column
+const float min_val = 0.07; // see Brown CQT paper for explanation
+const int calc_rate = 130; // Hz, calcs pinned to this rate, artifacts on tone tests and fails to meet calc_rate if too high
+const int N_columns = 32; // number of columns to display
+const int col_width = 2; // px, width of each column
 const int screen_width = 128; // px, width of screen
 const int screen_height = 64; // px, height of screen
 

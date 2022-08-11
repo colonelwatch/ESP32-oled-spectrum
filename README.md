@@ -4,10 +4,12 @@
 
 ⚠️ **Disclaimer!** ⚠️ This project depends on fixes introduced in the latest (as of writing) ESP32 v2.0.4 core. Upgrade the core through the Arduino boards manager.
 
-ESP32-oled-spectrum is a high-performance, high-resolution audio spectrum visualizer, leveraging what the ESP32 microcontroller and the SSD1306 OLED module uniquely offer. Namely, it's 64 bars of logarithmically-spaced frequencies moving at *426* frames per second, produced from the following:
+⚠️ **Disclaimer!** ⚠️ This branch is modified to have CQT kernels that are smooth in both time and frequency (higher accuracy) at the cost of anything but delay. Consequently, it has fewer bars, less dynamic range, and higher leakage between columns, but it renders music with extremely fast rhythms faithfully.
+
+ESP32-oled-spectrum is a high-performance, high-resolution audio spectrum visualizer, leveraging what the ESP32 microcontroller and the SSD1306 OLED module uniquely offer. Namely, it's 32 bars of logarithmically-spaced frequencies moving at *390* frames per second, produced from the following:
 
 * the I2S and I2C/SPI peripherals, not to mention both cores of the ESP32
-* a Constant Q transform ([cq_kernel](https://github.com/colonelwatch/cq_kernel)) computed from a 6144-point FFT ([kissfft](https://github.com/mborgerding/kissfft)), 142 times a second
+* a Constant Q transform ([cq_kernel](https://github.com/colonelwatch/cq_kernel)) computed from a 6144-point FFT ([kissfft](https://github.com/mborgerding/kissfft)), 130 times a second
   * the CQT essentially emulates sampling a bank of filters
 * post-processing, including a 3x interpolation routine
 

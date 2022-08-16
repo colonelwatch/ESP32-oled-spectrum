@@ -23,6 +23,11 @@
 extern "C" {
 #endif
 
+enum window_type{
+    HAMMING,
+    GAUSSIAN
+};
+
 /*
  *  cq_kernel_cfg - holds parameters used by cq_kernel
  *  
@@ -34,6 +39,7 @@ struct cq_kernel_cfg{
     float fmin;
     float fmax;
     float fs;
+    enum window_type window_type;
     kiss_fft_scalar min_val;    // sparse matrix threshold, see CQT paper
 };
 
@@ -55,7 +61,8 @@ typedef struct sparse_arr *cq_kernels_t;
 // private functions
 void _generate_center_freqs(float freq[], int bands, float fmin, float fmax);
 void _generate_hamming(kiss_fft_scalar window[], int N);
-void _generate_kernel(kiss_fft_cpx K[], kiss_fftr_cfg cfg, float f, float fmin, float fs, int N);
+void _generate_gaussian(kiss_fft_scalar window[], int N);
+void _generate_kernel(kiss_fft_cpx K[], kiss_fftr_cfg cfg, enum window_type window_type, float f, float fmin, float fs, int N);
 kiss_fft_scalar _mag(kiss_fft_cpx x);
 
 // public functions

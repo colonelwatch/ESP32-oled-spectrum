@@ -33,7 +33,8 @@ const int N_samples = 6144; // FFT length, prime factorication should contain as
 const int sampling_frequency = 44100; // Hz, I2S sampling frequency
 const int max_freq = 14000; // Hz, last CQT center freq to display, ensure CQT kernels aren't degenerated when changing
 const int min_freq = 40; // Hz, first CQT center freq to display, ensure CQT kernels aren't degenerated when changing
-const float min_val = 0.07; // see Brown CQT paper for explanation
+const enum window_type window_type = GAUSSIAN; // shape of CQT kernels
+const float min_val = 0.02; // see Brown CQT paper for explanation
 const int calc_rate = 130; // Hz, calcs pinned to this rate, artifacts on tone tests and fails to meet calc_rate if too high
 const int N_columns = 32; // number of columns to display
 const int col_width = 2; // px, width of each column
@@ -47,6 +48,7 @@ struct cq_kernel_cfg cq_cfg = { // accessed before all other tasks are started, 
     .fmin = min_freq,
     .fmax = max_freq,
     .fs = sampling_frequency,
+    .window_type = window_type,
     .min_val = min_val
 };
 cq_kernels_t kernels; // will point to kernels allocated in dynamic memory

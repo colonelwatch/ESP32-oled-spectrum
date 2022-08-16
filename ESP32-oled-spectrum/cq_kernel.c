@@ -30,13 +30,31 @@ void _generate_hamming(kiss_fft_scalar window[], int N){
     }
 }
 
-// TODO: Offer option of placing hamming window at end of kernel for lower latency?
-void _generate_kernel(kiss_fft_cpx kernel[], kiss_fftr_cfg cfg, float f, float fmin, float fs, int N){
-    // Generates window with hamming in the center and zero everywhere else
+void _generate_guassian(kiss_fft_scalar window[], int N){
+    float sigma = 0.5; // makes a window accurate to -30dB from peak, but smaller sigma is more accurate
+    for(int i = 0; i < N; i++){
+        #ifdef FIXED_POINT  // If fixed_point, represent window with integers
+        window[i] = SAMP_MAX*exp(-0.5*pow((i-N/2.0)/(sigma*N/2.0), 2));
+        #else               // Else if floating point, represent window as-is
+        window[i] = exp(-0.5*pow((i-N/2.0)/(sigma*N/2.0), 2));
+        #endif
+    }
+}
+
+void _generate_kernel(kiss_fft_cpx kernel[], kiss_fftr_cfg cfg, enum window_type window_type, float f, float fmin, float fs, int N){
+    // Generates window in the center and zero everywhere else
     float factor = f/fmin;
-    int hamming_N = N/factor; // Scales inversely with frequency (see CQT paper)
-    kiss_fft_scalar *time_K = calloc(N, sizeof(kiss_fft_scalar));
-    _generate_hamming(&time_K[(N-hamming_N)/2], hamming_N);
+    int N_window = N/factor; // Scales inversely with frequency (see CQT paper)
+    kiss_fft_scalar *time_K = (kiss_fft_scalar*)calloc(N, sizeof(kiss_fft_scalar));
+
+    switch(window_type){
+        case HAMMING:
+            _generate_hamming(&time_K[(N-N_window)/2], N_window);
+            break;
+        case GAUSSIAN:
+            _generate_guassian(&time_K[(N-N_window)/2], N_window);
+            break;
+    }
 
     // Fills window with f Hz wave sampled at fs Hz
     for(int i = 0; i < N; i++) time_K[i] *= cos(2*M_PI*(f/fs)*(i-N/2));
@@ -48,7 +66,7 @@ void _generate_kernel(kiss_fft_cpx kernel[], kiss_fftr_cfg cfg, float f, float f
         kernel[i].i *= factor;
     }
     #else // Else if floating point, follow CQT paper more exactly (normalize with N before FFT)
-    for(int i = 0; i < N; i++) time_K[i] /= hamming_N;
+    for(int i = 0; i < N; i++) time_K[i] /= N_window;
     kiss_fftr(cfg, time_K, kernel);
     #endif
 
@@ -71,7 +89,7 @@ struct sparse_arr* generate_kernels(struct cq_kernel_cfg cfg){
         // Clears temp_kernel before calling _generate_kernel on it
         for(int i = 0; i < cfg.samples; i++) temp_kernel[i].r = temp_kernel[i].i = 0;
 
-        _generate_kernel(temp_kernel, fft_cfg, freq[i], cfg.fmin, cfg.fs, cfg.samples);
+        _generate_kernel(temp_kernel, fft_cfg, cfg.window_type, freq[i], cfg.fmin, cfg.fs, cfg.samples);
 
         // Counts number of elements with a complex magnitude above cfg.min_val in temp_kernel
         int n_elems = 0;

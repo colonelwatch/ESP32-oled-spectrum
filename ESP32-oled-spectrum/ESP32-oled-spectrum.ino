@@ -26,6 +26,8 @@ const int dB_max = 45; // dB, maximum value to display
 const int clip_pin = 15; // Connect LED to this pin to get a clipping indicator (TODO: reimplement)
 const adc1_channel_t adc_channel = ADC1_CHANNEL_0; // Connect DC-biased line signal to this, see IDF docs for pin nums
 const float fft_mag_cutoff = 15.0; // factor used for cutting off noise in raw spectrum, raise if noise is in the output
+const int screen_width = 128; // px, width of screen
+const int screen_height = 64; // px, height of screen
 // #define SPI_SSD1306 // Uncomment if using a SPI SSD1306 OLED, also injects an interp routine for 3x the "frame rate"
 
 // Critical constants, not intended for end-user modification
@@ -38,8 +40,6 @@ const float min_val = 0.02; // see Brown CQT paper for explanation
 const int calc_rate = 120; // Hz, calcs pinned to this rate, artifacts on tone tests and fails to meet calc_rate if too high
 const int N_columns = 32; // number of columns to display
 const int col_width = 2; // px, width of each column
-const int screen_width = 128; // px, width of screen
-const int screen_height = 64; // px, height of screen
 
 // global variables, accessed during execution
 struct cq_kernel_cfg cq_cfg = { // accessed before all other tasks are started, so its global
@@ -128,11 +128,11 @@ void screen_Task_routine(void *pvParameters){
         }
 
         display.clearDisplay();
-        display.drawFastHLine(0, 63, 128, WHITE);
-        const int col_px = 128/N_columns;
+        display.drawFastHLine(0, screen_height-1, screen_width, WHITE);
+        const int col_px = screen_width/N_columns;
         for(int i = 0; i < N_columns; i++){
-            int length = y[i]*(64.0f/(dB_max-dB_min));
-            display.fillRect(i*col_px-col_width, 64-length, col_width, length, WHITE);
+            int length = y[i]*((float)screen_height/(dB_max-dB_min));
+            display.fillRect(i*col_px-col_width, screen_height-length, col_width, length, WHITE);
         }
         display.display();
         

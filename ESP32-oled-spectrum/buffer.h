@@ -7,7 +7,7 @@ template <typename TYPE, int SIZE> class doubleBuffer{
             writeBuffer = temp;
         }
         void alloc(){
-            readBuffer = (TYPE*)malloc(SIZE*sizeof(TYPE));
+            readBuffer = (TYPE*)calloc(SIZE, sizeof(TYPE));
             writeBuffer = (TYPE*)malloc(SIZE*sizeof(TYPE));
         }
 };

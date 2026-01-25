@@ -28,6 +28,7 @@ const adc1_channel_t adc_channel = ADC1_CHANNEL_0; // Connect DC-biased line sig
 const float fft_mag_cutoff = 15.0; // factor used for cutting off noise in raw spectrum, raise if noise is in the output
 const int screen_width = 128; // px, width of screen
 const int screen_height = 64; // px, height of screen
+// #define SHOW_FREQUENCY_MARKINGS // Uncomment to show frequency markings on the screen
 // #define SPI_SSD1306 // Uncomment if using a SPI SSD1306 OLED, also injects an interp routine for 3x the "frame rate"
 
 // Critical constants, not intended for end-user modification
@@ -95,9 +96,9 @@ void screen_Task_routine(void *pvParameters){
         }
         currentMicros = micros();
         #else
-        const int update_rate = 89;
-        while(micros()-currentMicros < 1000000/update_rate);
         currentMicros = micros();
+        // 1000000/update_rate = 1000000/89 = 11235.9551
+        while(micros()-currentMicros < 11235.9551);
         if(colBuffer_swap_ready){
             colBuffer.swap();
             colBuffer_swap_ready = false;
@@ -134,6 +135,11 @@ void screen_Task_routine(void *pvParameters){
             int length = y[i]*((float)screen_height/(dB_max-dB_min));
             display.fillRect(i*col_px-col_width, screen_height-length, col_width, length, WHITE);
         }
+        #ifdef SHOW_FREQUENCY_MARKINGS
+            display.fillRect(40, 2, 4, 3, WHITE); // 0-250Hz Bass band
+            display.fillRect(99, 2, 4, 3, WHITE); // 250-4000Hz Mid band
+            display.fillRect(70, 2, 2, 2, WHITE); // 1000Hz reference
+        #endif
         display.display();
         
         refresh++;
